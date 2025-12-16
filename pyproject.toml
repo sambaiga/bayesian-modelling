@@ -1,17 +1,145 @@
 [project]
 name = "bayesian-modelling"
 version = "0.1.0"
-description = "Add your description here"
+description = "The Bayesian Modelling package provides tools and utilities for performing Bayesian statistical modeling and analysis."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "altair>=5.5.0",
+    "pytensor>=2.31",
     "arviz>=0.22.0",
     "great-tables>=0.19.0",
     "ipywidgets>=8.1.7",
+    "lets-plot>=4.7.3",
     "notebook>=7.4.7",
-    "pymc>=5.25.1",
+    "pymc>=5.6.0",
     "scienceplots>=2.1.1",
     "seaborn>=0.13.2",
+    "tqdm>=4.67.1",
     "vl-convert-python>=1.8.0",
+    "scikit-learn>=1.7.2",
+    "numpy>=2.0.0",
+    "pandas>=2.2.3",
+    "pyarrow>=17.0.0",
+    "tqdm>=4.66.4,<5.0.0",
+    "lets-plot>=4.8.1",
+    "numba>=0.62.1",
+    "great-tables>=0.20.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "commitizen>=4.3.0",
+    "pre-commit>=4.4.0",
+    "pycln>=2.5.0",
+    "ruff>=0.9.3",
+    "mypy>=1.13.0",
+    "safety>=3.2.0",
+    "ipython>=9.1.0",
+    "ipykernel>=6.29.5",
+    "jupyter<=1.1.1",
+    "black>=24.0.0",
+    "nbstripout>=0.8.1",
+    "nbdime>=4.0.2"
+]
+
+[dependency-groups]
+test = [
+    "pytest>=9.0.0",
+    "pytest-cov>=7.0.0"
+]
+
+dev = [
+    "commitizen>=4.3.0",
+    "pre-commit>=4.4.0",
+    "pycln>=2.5.0",
+    "ruff>=0.9.3",
+    "mypy>=1.13.0",
+    "safety>=3.2.0",
+    "ipython>=9.1.0",
+    "ipykernel>=6.29.5",
+    "jupyter<=1.1.1",
+    "black>=24.0.0",
+    "nbstripout>=0.8.1",
+    "nbdime>=4.0.2"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bayes"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["notebooks"]
+addopts = "--cov=batteryml --cov-report=term-missing --cov-report=xml --cov-config=.coveragerc --cov-fail-under=80"
+
+[tool.ruff]
+target-version = "py311"
+exclude = ["__pycache__", "env", ".env", "venv", ".venv"]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "B", "C4", "D", "E", "F", "I", "N",
+    "PGH", "PTH", "Q", "S", "SIM", "TRY",
+    "UP", "W", "YTT"
+]
+ignore = [
+    "D100", "D101", "D102", "D103", "D104",
+    "D105", "D106", "D107", "D200", "D401",
+    "E402", "F401", "N812", "TRY003", "N803"
+]
+fixable=["ALL",]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["batteryml"]
+known-third-party = ["numpy", "pandas"]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.format]
+docstring-code-format = true
+quote-style ="double"
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["chr"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+disable_error_code = ["operator", "misc"]
+follow_imports = "skip"
+show_error_codes = false
+pretty = false
+exclude = "^(tests|examples)/"
+cache_dir = ".mypy_cache"
+incremental = true
+
+[tool.pycln]
+all = true
+exclude = ["tests/"]
+
+[tool.interrogate]
+ignore-init-module = true
+fail-under = 25
+verbose=true
+
+[tool.codespell]
+skip = "*.csv,*.parquet,*.toml,*.json,*.yml,*.yaml,*.lock,*.ipynb"
+ignore-words = "codespell.ignore"
+
+[tool.commitizen]
+bump_message = "bump: v$current_version → v$new_version"
+tag_format = "v$version"
+update_changelog_on_bump = true
+version_provider = "toml"
+version_files = ["pyproject.toml:project.version"]

@@ -2,23 +2,94 @@
 
 Follow these steps to quickly install all dependencies and set up the working environment.
 
-1. Install uv
-If you don't already have uv, install it using the recommended method:
+1. **Clone the repository**:
 
-```Bash
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```bash
+   git clone https://github.com/sambaiga/bayesian-modelling.git
+  ```
+
+2. **Install** [uv](https://docs.astral.sh/uv/getting-started/installation/) (if not already installed):
+
+  ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+3. **Create and activate the virtual environment**
+
+  ```bash
+    # Create the environment in .venv
+    uv venv --python 3.11
+  ```
+
+  ```bash
+    # Activate the environment # macOS/Linux
+    source .venv/bin/activate
+  ```
+
+  OR
+
+  ```bash
+     .venv\Scripts\activate     #Windows PowerShell
+  ```
+
+4. **Install all dependencies**
+
+This command reads the ``pyproject.toml`` file and installs all required packages (main, dev, test, etc.).
+
+ ```bash
+    uv sync --all-extras --dev
+ ```
+
+5. **Install the project in editable mode**.
+   This is crucial for development and ensures you can import your local ark package (e.g., in Jupyter notebooks).
+
+    ```bash
+        uv pip install -e .
+    ```
+
+6. **Initialize pre-commit hooks**
+This sets up hooks that automatically format and lint your code before each commit. Since pre-commit is now installed in your environment, we run it via `uv run`.
+
+    ```bash
+    uv run pre-commit install
+    ```
+
+  then
+
+  ```bash
+    uv run pre-commit autoupdate
+  ```
+
+7. **Enable nbdime** for improved Jupyter Notebook version diffs
+
+ ```bash
+ uv run nbdime config-git --enable --global
 ```
 
-Alternatively, you can install it via pipx.
-```bash 
-pipx install uv
-```
+8. **Install git-cliff (for changelog)**
+   If you want to maintain an automated changelog:
+   If you want to maintain an automated changelog:
 
-2. Sync Dependencies
-Navigate to the root directory of the project  and run.
-```bash
- uv sync
-```
-This will create a virtual environment and install all necessary dependencies.
+  ```bash
+    # macOS
+    brew install git-cliff
 
+    # Linux
+    curl -LsSf https://github.com/orhun/git-cliff/releases/latest/download/git-cliff-install.sh | sh
+
+    # Windows (PowerShell)
+    winget install -e --id gitcliff.gitcliff
+    # or
+    iwr https://github.com/orhun/git-cliff/releases/latest/download/git-cliff-install.ps1 -useb | iex
+
+    # Any OS (if you have Rust/Cargo)
+    cargo install git-cliff
+  ```
+
+9. **Verify everything works**
+
+  ```bash  
+  uv run python -c "import bayes; print('Bayes imported successfully!')"
+  ```
+
+</details>
