@@ -1,0 +1,192 @@
+default_language_version:
+  python: python3.11
+
+exclude: >-
+  (
+    \.venv/|
+    __pycache__/|
+    \.pytest_cache/|
+    \.idea/|
+    env/|
+    \.env/|
+    venv/|
+    \.venv/
+  )
+
+ci:
+  autofix_commit_msg: "chore: auto-fixes from pre-commit"
+  autofix_pr_title: "Auto-fixes from pre-commit.ci"
+  autoupdate_schedule: monthly
+  skip: []
+
+repos:
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.10.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+      - id: commitizen-branch
+        stages: [pre-push]
+
+
+  - repo: local
+    hooks:
+      - id: branch-name
+        name: Enforce branch naming (feature/*, fix/*, docs/*, release/*)
+        entry: >-
+          bash -c '
+            # In CI (GitHub Actions, GitLab CI, etc.) we are usually in detached HEAD → skip the check
+            if [ "$(git rev-parse --abbrev-ref HEAD)" = "HEAD" ]; then
+              exit 0
+            fi
+
+            branch="$(git rev-parse --abbrev-ref HEAD)"
+            if ! echo "$branch" | grep -E "^(feature|fix|docs|release)/"; then
+              echo "ERROR: Branch '\''$branch'\'' must start with feature/, fix/, docs/, or release/"
+              echo "       Allowed patterns: feature/my-thing, fix/bug-123, docs/readme-update, release/v1.2.3"
+              exit 1
+            fi
+          '
+        language: system
+        stages: [pre-commit]
+
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.9.17
+    hooks:
+      - id: uv-lock
+
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1200]
+      - id: check-docstring-first
+      - id: check-shebang-scripts-are-executable
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-toml
+      - id: check-ast
+        exclude: \.vscode
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: debug-statements
+      - id: end-of-file-fixer
+        exclude: ^LICENSE|\.(html|svg)$
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        exclude: \.(html|svg)$
+      - id: check-xml
+      - id: destroyed-symlinks
+      - id: no-commit-to-branch
+
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        additional_dependencies: [tomli]
+        args:
+          - --skip=*.csv,*.parquet,*.toml,*.json,*.yml,*.yaml,*.lock
+          - --ignore-words=codespell.ignore
+          - --write-changes
+
+
+
+
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.2
+    hooks:
+      - id: nbstripout
+        name: Strip notebook outputs on every commit
+        files: ^notebook/.*\.ipynb$
+        args:
+          - --drop-empty-cells
+          - --extra-keys=metadata.kernelspec metadata.execution metadata.widgets metadata.language_info
+
+
+  - repo: https://github.com/srstevenson/nb-clean
+    rev: 4.0.1
+    hooks:
+      - id: nb-clean
+        name: nb-clean (strip metadata & tidy cells)
+        entry: nb-clean clean
+        args:
+          - --remove-empty-cells
+        files: ^notebooks/.*\.ipynb$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.9
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi, jupyter]
+      - id: ruff-format
+        types_or: [python, pyi, jupyter]
+
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.21.2
+    hooks:
+      - id: pyupgrade
+        args: [--py311-plus]
+
+
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0
+    hooks:
+       - id: interrogate
+         args: [--fail-under=25, --ignore-init-module, --verbose, --config=pyproject.toml]
+
+
+  - repo: https://github.com/hadialqattan/pycln
+    rev: v2.6.0
+    hooks:
+      - id: pycln
+        args: [--all, --config=pyproject.toml]
+
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        args:
+          - --config-file=pyproject.toml
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+
+
+  - repo: local
+    hooks:
+      - id: nbdime-notebook-diff
+        name: nbdime notebook diff (oneline)
+        language: system
+        types: [jupyter]
+        entry: bash -c 'for f in "$@"; do nbdiff --no-color --oneline "$f" || true; done'
+
+
+  - repo: https://github.com/pre-commit/pre-commit
+    rev: v4.5.0
+    hooks:
+      - id: validate_manifest
+        name: Prettier - format Markdown, YAML, JSON, etc.
+        types_or: [yaml, markdown, json, graphql, html]
+        args: [--write, --log-level=warn]
+
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.47.0
+    hooks:
+      - id: markdownlint
+        name: markdownlint - lint + auto-fix
+        args:
+          - --fix
+          - --disable=MD033
+          - --disable=MD041
+          - --disable=MD029
+          - --disable=MD013
+        exclude: ^CHANGELOG\.md$
