@@ -40,7 +40,7 @@ tableau10 = [
 
 def modern_theme(
     show_x_axis: bool = True,
-    font_size: int = 12,
+    font_size: int = 10,
     line_width: float = 1.0,
     x_axis_angle: int = 0,
     legend_pos: Literal["top", "bottom", "left", "right"] = "top",
