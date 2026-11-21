@@ -1,4 +1,4 @@
-## Setting Up the Project
+## Setting Up the Project (Basic)
 
 Follow these steps to quickly install all dependencies and set up the working environment.
 
