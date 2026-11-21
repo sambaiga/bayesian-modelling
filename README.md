@@ -40,14 +40,6 @@ This command reads the ``pyproject.toml`` file and installs all required package
     uv sync --all-extras --dev
  ```
 
-Then  **verify everything works**
-
-  ```bash  
-  uv run python -c "import bayes; print('Bayes imported successfully!')"
-  ```
-
-## 💻 Developer Setup (Optional)
-
 5. **Install the project in editable mode**.
    This is crucial for development and ensures you can import your local ark package (e.g., in Jupyter notebooks).
 
@@ -94,12 +86,10 @@ This sets up hooks that automatically format and lint your code before each comm
     cargo install git-cliff
   ```
 
+9. **Verify everything works**
+
+  ```bash  
+  uv run python -c "import bayes; print('Bayes imported successfully!')"
+  ```
+
 </details>
-
-## 🏃 Running the Project
-
-Once setup is complete:
-
-1. Open the project in **VS Code**. Make sure you have the [Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python) and [Jupyter Notebook](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter) extensions installed.
-2. Run the **appropriate** notebook (file with `.ipynb` extension) from the `/notebooks` folder.
-3. Verify imports and paths load correctly.
