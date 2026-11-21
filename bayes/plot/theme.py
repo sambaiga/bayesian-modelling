@@ -1,6 +1,6 @@
 from typing import Literal
 
-from lets_plot import element_blank, element_line, element_text, margin, theme
+from lets_plot import element_blank, element_line, element_rect, element_text, margin, theme
 
 pro_colors_old = [
     "#0078D4",  # Bright blue (primary accent)
@@ -139,3 +139,33 @@ def modern_theme(
         )
 
     return base_theme
+
+
+# Colours by role: subject blue, highlight orange, reference slate, context grey.
+BLUE, ORANGE, SLATE, INK, GREY = "#0369A1", "#E26029", "#64748B", "#1E293B", "#CED4DA"
+SITE_FONT = "'Libre Franklin', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+
+def site_theme(font_size: float = 11) -> theme:
+    """Theme of the figures of the blog: thin dark axes on the left and bottom, no grid, no legend, Libre Franklin.
+
+    Args:
+        font_size: Size of the axis and strip text.
+
+    Returns:
+        A Lets-Plot theme with a white plot background, so that a figure reads in a dark page as well.
+    """
+    return theme(
+        legend_position="none",
+        plot_background=element_rect(fill="white", color="white"),
+        panel_background=element_blank(),
+        panel_border=element_blank(),
+        panel_grid=element_blank(),
+        strip_background=element_blank(),
+        strip_text=element_text(face="bold", size=font_size + 1, hjust=0),
+        axis_line=element_line(size=0.5, color=INK),
+        axis_ticks=element_line(size=0.5, color=INK),
+        axis_ticks_length=4,
+        text=element_text(family=SITE_FONT, size=font_size, color=INK),
+        plot_margin=[8, 18, 4, 4],
+    )

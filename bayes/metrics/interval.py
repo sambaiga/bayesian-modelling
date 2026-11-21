@@ -50,6 +50,37 @@ def winkler_score(
     return np.median(scores)
 
 
+def interval_score(true: np.ndarray, lower: np.ndarray, upper: np.ndarray, alpha: float) -> float:
+    r"""Mean interval score, a proper score for a central interval with nominal coverage ``1 - alpha``.
+
+    For each observation the score is the width of the interval, plus ``2 / alpha`` times the distance by which the
+    observation lies outside it. The mean over observations is proper, whereas the median is not: the median of the
+    scores can be lowered by an interval that is too narrow for the tail of observations (Gneiting and Raftery, 2007).
+
+    Args:
+        true: Observed values.
+        lower: Lower bounds of the intervals.
+        upper: Upper bounds of the intervals.
+        alpha: Significance level; the interval has nominal coverage ``1 - alpha``.
+
+    Returns:
+        The mean interval score, in the unit of the observations; smaller is better.
+
+    Raises:
+        ValueError: If ``alpha`` is not in (0, 1) or the arrays differ in length.
+
+    Examples:
+        >>> interval_score(np.array([1.0, 5.0]), np.array([0.0, 0.0]), np.array([2.0, 2.0]), alpha=0.1)
+        32.0
+    """
+    if not 0 < alpha < 1:
+        raise ValueError(f"alpha must be between 0 and 1 (exclusive), got {alpha}")
+    true, lower, upper = (np.asarray(values, dtype=float) for values in (true, lower, upper))
+    check_consistent_length(true, lower, upper)
+    penalty = (2.0 / alpha) * (np.maximum(lower - true, 0.0) + np.maximum(true - upper, 0.0))
+    return float(np.mean(upper - lower + penalty))
+
+
 def interval_coverage(true: np.array, lower: np.array, upper: np.array) -> float:
     r"""Calculate the coverage proportion of prediction intervals.
 
