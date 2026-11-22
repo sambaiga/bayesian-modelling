@@ -41,18 +41,6 @@ def test_spread_leaves_well_separated_values_unchanged():
     assert hierarchy.spread([1.0, 5.0, 3.0], gap=0.5) == [1.0, 5.0, 3.0]
 
 
-def test_the_scores_figure_has_three_panels_and_labels_every_strategy():
-    scores = pd.DataFrame(
-        [
-            {"strategy": strategy, "cycles_seen": seen, "mae": 3.0, "coverage": 0.9, "interval": 20.0}
-            for strategy in hierarchy.STRATEGIES
-            for seen in (0, 100)
-        ]
-    )
-    spec = hierarchy.coldstart(scores, nominal=0.9).as_dict()
-    assert labels_of(spec) >= set(hierarchy.STRATEGIES.values())
-
-
 def test_the_loo_figure_marks_the_best_model_and_draws_one_row_per_model():
     table = pd.DataFrame({"method": ["A", "B", "C"], "elpd_diff": [0.0, 10.0, 200.0], "dse": [0.0, 3.0, 20.0]})
     spec = hierarchy.loo(table, best="A").as_dict()
@@ -63,3 +51,27 @@ def test_an_inline_svg_scales_with_its_container():
     plot = hierarchy.loo(pd.DataFrame({"method": ["A"], "elpd_diff": [0.0], "dse": [0.0]}), best="A")
     html = inline_svg(plot)
     assert html.startswith('<div class="letsplot"><svg') and 'viewBox="0 0 780 240"' in html and 'width="100%"' in html
+
+
+def test_heldout_draws_one_panel_for_each_cell():
+    frame = pd.DataFrame(
+        {
+            "cell": np.repeat(["a", "b", "c"], 4),
+            "cycle": np.tile([1.0, 2.0, 3.0, 4.0], 3),
+            "observed": 90.0,
+            "median": 90.0,
+            "lower": 85.0,
+            "upper": 95.0,
+        }
+    )
+    spec = hierarchy.heldout(frame).as_dict()
+    assert spec["facet"]["name"] == "wrap" and "<svg" in inline_svg(hierarchy.heldout(frame))
+
+
+def test_effects_orders_the_diagnostics_by_their_mean():
+    table = pd.DataFrame(
+        {"feature": ["x", "y", "z"], "mean": [0.3, -0.2, 0.0], "lower": [0.1, -0.4, -0.1], "upper": [0.5, 0.0, 0.1]}
+    )
+    spec = hierarchy.effects(table).as_dict()
+    discrete = [scale for scale in spec["scales"] if scale.get("aesthetic") == "y"][0]
+    assert discrete["limits"] == ["y", "z", "x"]
