@@ -15,7 +15,6 @@ from lets_plot import (
     geom_segment,
     geom_vline,
     ggplot,
-    ggsize,
     labs,
     scale_color_manual,
     scale_linetype_manual,
@@ -28,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from .hierarchy import label, spread, tint
-from .theme import BLUE, INK, ORANGE, SLATE, site_theme
+from .theme import BLUE, INK, ORANGE, SLATE, canvas, columns, site_theme
 
 
 def rates(grid: np.ndarray, prior: np.ndarray, likelihood: np.ndarray, posterior: np.ndarray):  # noqa: ANN201
@@ -75,7 +74,7 @@ def rates(grid: np.ndarray, prior: np.ndarray, likelihood: np.ndarray, posterior
         + names[2]
         + labs(x="Failure rate (per machine-year)", y="Density")
         + site_theme()
-        + ggsize(720, 340)
+        + canvas(720, 340)
     )
 
 
@@ -108,7 +107,7 @@ def prior_check(shares: np.ndarray, observed: int):  # noqa: ANN201
         + scale_x_continuous(breaks=list(range(len(shares))))
         + labs(x="Failures in the pilot", y="Share of prior predictive draws")
         + site_theme()
-        + ggsize(720, 320)
+        + canvas(720, 320)
     )
 
 
@@ -135,7 +134,7 @@ def traces(draws: np.ndarray):  # noqa: ANN201
         + scale_color_manual(values=dict.fromkeys(frame["chain"].unique(), BLUE))
         + labs(x="Iteration", y="Failure rate (per machine-year)")
         + site_theme()
-        + ggsize(720, 300)
+        + canvas(720, 300)
     )
 
 
@@ -171,7 +170,7 @@ def survival_curves(frame: pd.DataFrame, horizon: float, subject: str):  # noqa:
         + scale_y_continuous(limits=[0, 1])
         + labs(x="Years in service", y="Probability of surviving")
         + site_theme()
-        + ggsize(720, 340)
+        + canvas(720, 340)
     )
 
 
@@ -197,10 +196,10 @@ def sensitivity(table: pd.DataFrame, price: float):  # noqa: ANN201
         + geom_vline(aes(xintercept="x"), data=reference, color=SLATE, linetype="dotted", size=0.5, inherit_aes=False)
         + geom_segment(aes(x="zero", xend="value", yend="prior"), color=tint(BLUE, 0.4), size=1.2)
         + geom_point(color=BLUE, shape=21, fill="white", size=3.6, stroke=1.4)
-        + facet_wrap("measure", ncol=2, scales="free_x")
+        + facet_wrap("measure", ncol=columns(2), scales="free_x")
         + scale_y_discrete(limits=order[::-1])
         + labs(x="", y="")
         + site_theme()
         + theme(axis_text_y=element_text(size=11))
-        + ggsize(840, 280)
+        + canvas(840, 280, 2, 2)
     )

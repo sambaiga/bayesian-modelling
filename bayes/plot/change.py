@@ -15,7 +15,6 @@ from lets_plot import (
     geom_segment,
     geom_text,
     ggplot,
-    ggsize,
     labs,
     scale_color_manual,
     scale_x_continuous,
@@ -24,7 +23,7 @@ from lets_plot import (
 import numpy as np
 import pandas as pd
 
-from .theme import BLUE, INK, ORANGE, SLATE, site_theme
+from .theme import BLUE, INK, ORANGE, SLATE, canvas, columns, site_theme
 
 MINUS = "−"
 
@@ -99,10 +98,10 @@ def change(  # noqa: ANN201
         + geom_text(aes("end", "name", label="text"), data=drawn[drawn["side"] == 0.0], hjust=0, size=5.6, color=INK)
         + geom_text(aes("end", "name", label="text"), data=drawn[drawn["side"] == 1.0], hjust=1, size=5.6, color=INK)
         + geom_text(aes("x", "name", label="label"), data=top, size=5.4, color=SLATE, hjust=0.5)
-        + facet_wrap("panel", ncol=ncol)
+        + facet_wrap("panel", ncol=columns(ncol))
         + scale_y_discrete(limits=rows[::-1])
         + scale_x_continuous(limits=[low - left, high + room], format="{.0f}" + unit)
         + labs(x="", y="")
         + site_theme()
-        + ggsize(900, 60 + 40 * len(rows))
+        + canvas(900, 60 + 40 * len(rows), drawn["panel"].nunique(), ncol)
     )

@@ -1,6 +1,8 @@
+from contextlib import contextmanager
+import math
 from typing import Literal
 
-from lets_plot import element_blank, element_line, element_rect, element_text, margin, theme
+from lets_plot import element_blank, element_line, element_rect, element_text, ggsize, margin, theme
 
 pro_colors_old = [
     "#0078D4",  # Bright blue (primary accent)
@@ -169,3 +171,59 @@ def site_theme(font_size: float = 11) -> theme:
         text=element_text(family=SITE_FONT, size=font_size, color=INK),
         plot_margin=[8, 18, 4, 4],
     )
+
+
+PHONE_WIDTH = 420
+_LAYOUT = {"phone": False}
+
+
+@contextmanager
+def phone_layout():  # noqa: ANN201
+    """Build figures for a phone inside the block: narrow, with the panels stacked.
+
+    A figure is drawn twice, once for the page and once for a phone, and the page shows the one that fits. A narrow
+    canvas keeps the text at a readable size when the figure is scaled to the width of the screen.
+    """
+    _LAYOUT["phone"] = True
+    try:
+        yield
+    finally:
+        _LAYOUT["phone"] = False
+
+
+def columns(desktop: int, phone: int = 1) -> int:
+    """Panels in a row: ``desktop`` normally, ``phone`` inside :func:`phone_layout`.
+
+    Args:
+        desktop: Panels in a row on a wide screen.
+        phone: Panels in a row on a phone.
+
+    Returns:
+        The number of columns of panels to draw.
+    """
+    return phone if _LAYOUT["phone"] else desktop
+
+
+def canvas(width: int, height: int, panels: int = 1, ncol: int = 1, phone_ncol: int = 1):  # noqa: ANN201
+    """The size of a figure: as given, or narrow with the panels re-stacked inside :func:`phone_layout`.
+
+    On a phone the canvas is ``PHONE_WIDTH`` wide and each panel keeps its aspect ratio, a little taller so that its
+    text stays readable.
+
+    Args:
+        width: Width in pixels on a wide screen.
+        height: Height in pixels on a wide screen, with about 60 pixels of margin and axis.
+        panels: Number of panels.
+        ncol: Columns of panels on a wide screen.
+        phone_ncol: Columns of panels on a phone.
+
+    Returns:
+        A Lets-Plot size.
+    """
+    if not _LAYOUT["phone"]:
+        return ggsize(width, height)
+    rows_wide = math.ceil(panels / ncol)
+    rows_phone = math.ceil(panels / phone_ncol)
+    per_panel = (height - 60) / rows_wide
+    ratio = (PHONE_WIDTH / phone_ncol) / (width / ncol)
+    return ggsize(PHONE_WIDTH, int(60 + rows_phone * per_panel * ratio * 1.15))

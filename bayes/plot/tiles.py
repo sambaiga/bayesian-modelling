@@ -14,7 +14,6 @@ from lets_plot import (
     geom_text,
     geom_tile,
     ggplot,
-    ggsize,
     labs,
     scale_color_manual,
     scale_fill_gradient,
@@ -25,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 from .hierarchy import tint
-from .theme import BLUE, INK, ORANGE, site_theme
+from .theme import BLUE, INK, ORANGE, canvas, columns, site_theme
 
 
 def long_frame(
@@ -55,10 +54,10 @@ def long_frame(
     flags = flags or {}
     labels = labels or {}
     parts = []
-    for panel, columns in panels.items():
-        values = np.array([[frame.loc[row, column] for column in columns] for row in rows], dtype=float)
+    for panel, shown in panels.items():
+        values = np.array([[frame.loc[row, column] for column in shown] for row in rows], dtype=float)
         low, high = float(values.min()), float(values.max())
-        for position, (column, header) in enumerate(columns.items()):
+        for position, (column, header) in enumerate(shown.items()):
             for index, row in enumerate(rows):
                 value = float(values[index, position])
                 shade = 0.5 if high == low else (value - low) / (high - low)
@@ -77,7 +76,9 @@ def long_frame(
     return pd.DataFrame(parts)
 
 
-def tiles(long: pd.DataFrame, rows: list[str], ncol: int = 3, width: int = 900, height: int | None = None):  # noqa: ANN201
+def tiles(  # noqa: ANN201
+    long: pd.DataFrame, rows: list[str], ncol: int = 3, width: int = 900, height: int | None = None, phone_ncol: int = 1
+):
     """Draw the tiles of a long frame, one panel for each group of columns.
 
     Args:
@@ -86,6 +87,7 @@ def tiles(long: pd.DataFrame, rows: list[str], ncol: int = 3, width: int = 900, 
         ncol: Panels in a row.
         width: Width of the figure in pixels.
         height: Height in pixels; by default 70 plus 38 for each row of tiles and panel.
+        phone_ncol: Panels in a row on a phone.
 
     Returns:
         The figure.
@@ -100,7 +102,7 @@ def tiles(long: pd.DataFrame, rows: list[str], ncol: int = 3, width: int = 900, 
         + geom_tile(data=flagged, fill="rgba(0,0,0,0)", color=ORANGE, size=1.6)
         + geom_text(aes(label="label", color="ink"), size=5.6)
         + scale_color_manual(values={"white": "white", "dark": INK})
-        + facet_wrap("panel", ncol=ncol, scales="free_x")
+        + facet_wrap("panel", ncol=columns(ncol, phone_ncol), scales="free_x")
         + scale_y_discrete(limits=rows[::-1])
         + labs(x="", y="")
         + site_theme()
@@ -110,7 +112,7 @@ def tiles(long: pd.DataFrame, rows: list[str], ncol: int = 3, width: int = 900, 
             axis_text_x=element_text(size=10.5),
             axis_text_y=element_text(size=11),
         )
-        + ggsize(width, height)
+        + canvas(width, height, panels, ncol, phone_ncol)
     )
 
 
