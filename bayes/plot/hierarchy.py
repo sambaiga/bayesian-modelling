@@ -28,6 +28,7 @@ from lets_plot import (
     scale_linetype_manual,
     scale_x_continuous,
     scale_y_continuous,
+    scale_y_discrete,
     theme,
 )
 import numpy as np
@@ -74,7 +75,7 @@ def palette(names: list[str]) -> dict[str, str]:
     return dict(zip(names, [BLUE, ORANGE, SLATE, GREY], strict=False))
 
 
-def label(frame: pd.DataFrame, colour: str = INK, hjust: float = 0.0, size: float = 4.4):  # noqa: ANN201
+def label(frame: pd.DataFrame, colour: str = INK, hjust: float = 0.0, size: float = 5.2):  # noqa: ANN201
     """Direct labels with a white halo, from a frame with columns ``x``, ``y`` and ``label``.
 
     Args:
@@ -142,9 +143,9 @@ def curves(frame: pd.DataFrame, held_out: list[str], colours: dict[str, str], th
         + label(
             pd.DataFrame({"x": [60.0], "y": [threshold + 3.0], "label": [f"End of life, {threshold:.0f}%"]}),
             SLATE,
-            size=4.2,
+            size=5.0,
         )
-        + label(ends.assign(x=ends["cycle"] + 40, y=ends["soh"]), size=4.6)
+        + label(ends.assign(x=ends["cycle"] + 40, y=ends["soh"]), size=5.4)
         + scale_x_continuous(limits=[0, drawn["cycle"].max() + 280])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
@@ -186,8 +187,8 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
         + geom_density(size=1.0, alpha=0.18, trim=True)
         + scale_color_manual(values={"Observed": BLUE, "Prior predictive": SLATE})
         + scale_fill_manual(values={"Observed": BLUE, "Prior predictive": SLATE})
-        + label(peaks.iloc[[0]], BLUE, hjust=0.5, size=4.6)
-        + label(peaks.iloc[[1]], SLATE, hjust=0.5, size=4.6)
+        + label(peaks.iloc[[0]], BLUE, hjust=0.5, size=5.4)
+        + label(peaks.iloc[[1]], SLATE, hjust=0.5, size=5.4)
         + scale_x_continuous(breaks=[0, 25, 50, 75, 100])
         + labs(x="State of health (%)", y="Density")
         + site_theme()
@@ -283,59 +284,6 @@ def predictions(frame: pd.DataFrame):  # noqa: ANN201
     )
 
 
-def coldstart(scores: pd.DataFrame, nominal: float):  # noqa: ANN201
-    """Error, coverage and interval score of each strategy against the cycles of a new cell that the model has seen.
-
-    Args:
-        scores: Rows with ``strategy`` (a key of ``STRATEGIES``), ``cycles_seen``, ``mae``, ``coverage``,
-            ``interval``.
-        nominal: Nominal coverage of the intervals, drawn as a reference line in the coverage panel.
-
-    Returns:
-        The figure.
-    """
-    colours = {
-        "No pooling": GREY,
-        "Complete pooling": SLATE,
-        "Partial pooling": BLUE,
-        "Complete pooling, no diagnostics": ORANGE,
-    }
-    long = scores.melt(
-        id_vars=["strategy", "cycles_seen"], value_vars=["mae", "coverage", "interval"], var_name="measure"
-    )
-    long["measure"] = long["measure"].map(
-        {
-            "mae": "(a) Error of the median (points)",
-            "coverage": "(b) Coverage of the 90% interval",
-            "interval": "(c) Interval score (points)",
-        }
-    )
-    long["strategy"] = long["strategy"].map(STRATEGIES)
-    last = long["cycles_seen"].max()
-    ends = long[long["cycles_seen"] == last].reset_index(drop=True)
-    for _, group in ends.groupby("measure"):
-        span = (
-            long.loc[long["measure"] == group["measure"].iloc[0], "value"].max()
-            - long.loc[long["measure"] == group["measure"].iloc[0], "value"].min()
-        )
-        ends.loc[group.index, "value"] = spread(group["value"].tolist(), 0.09 * span)
-    ends = ends.assign(x=last + 15, y=ends["value"], label=ends["strategy"])
-    reference = pd.DataFrame({"measure": ["(b) Coverage of the 90% interval"], "y": [nominal]})
-    return (
-        ggplot(long, aes("cycles_seen", "value", color="strategy"))
-        + geom_hline(aes(yintercept="y"), data=reference, color=SLATE, linetype="dotted", size=0.5, inherit_aes=False)
-        + geom_line(size=1.0)
-        + geom_point(shape=21, fill="white", size=3.0, stroke=1.3)
-        + scale_color_manual(values=colours)
-        + label(ends, INK, size=4.0)
-        + facet_wrap("measure", ncol=3, scales="free_y")
-        + scale_x_continuous(breaks=sorted(scores["cycles_seen"].unique()), limits=[-20, last + 420])
-        + labs(x="Cycles of the new cell seen by the model", y="")
-        + site_theme()
-        + ggsize(900, 340)
-    )
-
-
 def loo(table: pd.DataFrame, best: str):  # noqa: ANN201
     """Loss in expected log predictive density against the best model, with a one-standard-error bar.
 
@@ -359,5 +307,49 @@ def loo(table: pd.DataFrame, best: str):  # noqa: ANN201
         + labs(x="Loss in expected log predictive density against the best model (smaller is better)", y="")
         + site_theme()
         + theme(axis_line_y=element_blank(), axis_ticks_y=element_blank())
+        + ggsize(780, 240)
+    )
+
+
+def heldout(frame: pd.DataFrame):  # noqa: ANN201
+    """Median and 90% interval against the observed state of health, one panel for each held-out cell.
+
+    Args:
+        frame: Rows with ``cell``, ``cycle``, ``observed``, ``median``, ``lower`` and ``upper``.
+
+    Returns:
+        The figure.
+    """
+    return (
+        ggplot(frame, aes("cycle"))
+        + geom_ribbon(aes(ymin="lower", ymax="upper"), fill=tint(BLUE, 0.8), size=0)
+        + geom_line(aes(y="median"), color=BLUE, size=1.0)
+        + geom_point(aes(y="observed"), color=INK, shape=21, fill="white", size=1.4, stroke=0.7)
+        + facet_wrap("cell", ncol=3, scales="free_x")
+        + scale_y_continuous(limits=[0, 110])
+        + labs(x="Cycle", y="State of health (%)")
+        + site_theme()
+        + ggsize(900, 400)
+    )
+
+
+def effects(table: pd.DataFrame):  # noqa: ANN201
+    """Posterior mean and 90% interval of the effect of each standardised diagnostic.
+
+    Args:
+        table: Rows with ``feature``, ``mean``, ``lower`` and ``upper``.
+
+    Returns:
+        The figure.
+    """
+    ordered = table.sort_values("mean").reset_index(drop=True)
+    return (
+        ggplot(ordered, aes(y="feature"))
+        + geom_vline(xintercept=0.0, color=SLATE, linetype="dotted", size=0.5)
+        + geom_segment(aes(x="lower", xend="upper", yend="feature"), color=BLUE, size=1.3)
+        + geom_point(aes(x="mean"), color=BLUE, shape=21, fill="white", size=3.4, stroke=1.4)
+        + scale_y_discrete(limits=list(ordered["feature"]))
+        + labs(x="Effect on the logit of the state of health, per standard deviation", y="")
+        + site_theme()
         + ggsize(780, 240)
     )

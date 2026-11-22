@@ -111,3 +111,73 @@ def test_split_separates_the_held_out_cells_and_rejects_an_unknown_one(cells):
     assert "X2" not in set(train["cell"]) and set(held["cell"]) == {"X2"}
     with pytest.raises(ValueError):
         calce.split(cells, ["Z9"])
+
+
+def test_leave_one_out_scores_every_cell_once_and_never_trains_on_the_held_out_cell(cells, tmp_path):
+    subset = cells[cells["CellType"] == "X"]
+    settings = {"draws": 30, "tune": 30, "chains": 2}
+    scores, curves = evaluate.leave_one_out(subset, FEATURES, "complete", tmp_path, settings, draws=50)
+    assert list(scores["cell"]) == ["X0", "X1", "X2"]
+    assert (scores["n"] == subset.groupby("cell").size().to_numpy()).all()
+    assert len(curves) == len(subset) and {"median", "lower", "upper"} <= set(curves.columns)
+    assert len(list(tmp_path.glob("loo-complete-*.nc"))) == 3
+
+
+def test_leave_one_out_rejects_one_cell_and_an_unknown_strategy(cells, tmp_path):
+    settings = {"draws": 10, "tune": 10, "chains": 1}
+    with pytest.raises(ValueError, match="at least two"):
+        evaluate.leave_one_out(cells[cells["cell"] == "X0"], FEATURES, "complete", tmp_path, settings)
+    with pytest.raises(ValueError, match="strategy"):
+        evaluate.leave_one_out(cells, FEATURES, "bogus", tmp_path, settings)
+
+
+def test_percent_change_is_zero_against_itself_and_signed_against_a_better_reference():
+    scores = pd.DataFrame(
+        {
+            "cell": ["a", "b", "a", "b"],
+            "strategy": ["complete", "complete", "control", "control"],
+            "mae": [2.0, 4.0, 3.0, 2.0],
+        }
+    )
+    same = evaluate.percent_change(scores, {"mae": "(a) Error"}, "complete", "complete")
+    assert (same["value"] == 0.0).all()
+    result = evaluate.percent_change(scores, {"mae": "(a) Error"}, "control", "complete")
+    assert result["panel"].eq("(a) Error").all() and result["value"].tolist() == [50.0, -50.0]
+    assert result["name"].tolist() == ["a", "b"]
+
+
+def test_percent_change_rejects_a_missing_strategy_and_a_zero_reference():
+    scores = pd.DataFrame({"cell": ["a", "a"], "strategy": ["x", "y"], "mae": [0.0, 1.0]})
+    with pytest.raises(ValueError, match="no rows"):
+        evaluate.percent_change(scores, {"mae": "m"}, "z", "x")
+    with pytest.raises(ValueError, match="positive"):
+        evaluate.percent_change(scores, {"mae": "m"}, "y", "x")
+
+
+def test_change_by_strategy_has_one_panel_per_value_and_zero_for_the_reference_itself():
+    scores = pd.DataFrame(
+        {
+            "strategy": ["complete", "partial"] * 2,
+            "cycles_seen": [0, 0, 100, 100],
+            "interval": [20.0, 30.0, 20.0, 10.0],
+        }
+    )
+    labels = {"complete": "Complete pooling", "partial": "Partial pooling"}
+    result = evaluate.change_by_strategy(scores, "interval", "complete", ["partial", "complete"], labels)
+    assert list(result["panel"].unique()) == ["(a) 0 cycles seen", "(b) 100 cycles seen"]
+    assert result[result["name"] == "Partial pooling"]["value"].tolist() == [50.0, -50.0]
+    assert result[result["name"] == "Complete pooling"]["value"].tolist() == [0.0, 0.0]
+
+
+def test_coverage_gap_marks_only_a_large_shortfall_as_worse():
+    scores = pd.DataFrame(
+        {
+            "strategy": ["partial", "none", "partial", "none"],
+            "cycles_seen": [0, 0, 300, 300],
+            "coverage": [1.0, 0.95, 0.5, 0.88],
+        }
+    )
+    labels = {"partial": "Partial pooling", "none": "No pooling"}
+    result = evaluate.coverage_gap(scores, 0.9, ["partial", "none"], labels, subject="partial")
+    assert result["value"].round(6).tolist() == [10.0, 5.0, -40.0, -2.0]
+    assert result["role"].tolist() == ["subject", "other", "worse", "other"]

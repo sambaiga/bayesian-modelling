@@ -163,3 +163,172 @@ def cold_start(
                     )
                 )
     return pd.DataFrame(scores), pd.DataFrame(diagnostics), pd.concat(curves, ignore_index=True)
+
+
+def leave_one_out(
+    frame: pd.DataFrame,
+    features: list[str],
+    strategy: str,
+    cache: Path,
+    settings: dict[str, int],
+    seed: int = 2026,
+    draws: int = 1000,
+    alpha: float = ALPHA,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Predict each cell from a model fitted to all the other cells, and score the whole life of the cell.
+
+    Every fold fits its own scaler on its training cells, so nothing of the held-out cell reaches the model. A fold is
+    stored in ``cache`` under the strategy and the cell, so a repeat run reads the fits back.
+
+    Args:
+        frame: Rows of all cells, with ``cell``, ``CellType``, ``cycle``, ``soh``, ``y`` and the features.
+        features: Names of the diagnostic columns.
+        strategy: A key of ``STRATEGY``.
+        cache: Folder of the stored fits.
+        settings: ``draws``, ``tune`` and ``chains`` of each fit.
+        seed: Seed of the first fit; a fold uses ``seed`` plus its position.
+        draws: Predictive draws per cell.
+        alpha: Significance level of the intervals.
+
+    Returns:
+        The scores, one row per cell, and the predictions of every cell, with ``median``, ``lower`` and ``upper``.
+
+    Raises:
+        ValueError: If there are fewer than two cells or ``strategy`` is unknown.
+    """
+    if strategy not in STRATEGY:
+        raise ValueError(f"strategy must be one of {list(STRATEGY)}, got {strategy!r}")
+    cells = sorted(frame["cell"].unique())
+    if len(cells) < 2:
+        raise ValueError("leave-one-out needs at least two cells")
+    pooling, diagnostics = STRATEGY[strategy]
+    scores, curves = [], []
+    for position, cell in enumerate(cells):
+        train, test = frame[frame["cell"] != cell], frame[frame["cell"] == cell]
+        scaler = StandardScaler().fit(train[features])
+        model = hier.hierarchical_model(train, scaler, features, pooling, diagnostics)
+        idata = hier.sample(model, cache / f"loo-{strategy}-{cell}.nc", seed=seed + position, **settings)
+        predicted = predict_cells(idata, strategy, test, scaler, features, seed + 100 * position, False, draws)
+        scores.append({"cell": cell, "strategy": strategy, **score(predicted, alpha)})
+        curves.append(predicted.assign(strategy=strategy))
+    return pd.DataFrame(scores), pd.concat(curves, ignore_index=True)
+
+
+def percent_change(
+    scores: pd.DataFrame,
+    measures: dict[str, str],
+    strategy: str,
+    reference: str,
+    key: str = "cell",
+) -> pd.DataFrame:
+    """Change in percent of one strategy against a reference strategy, for each row key and measure.
+
+    Args:
+        scores: Rows with ``strategy``, the ``key`` column and the measures, such as the result of ``leave_one_out``.
+        measures: Titles of the panels, by measure column, for example ``{"mae": "(a) Error of the median"}``.
+        strategy: The strategy that is compared.
+        reference: The strategy that is the reference, whose value of each measure is the zero of the change.
+        key: Column that identifies a row of the comparison, such as the held-out cell.
+
+    Returns:
+        Rows with ``panel``, ``name`` (the key) and ``value`` (``100 * (strategy / reference - 1)``).
+
+    Raises:
+        ValueError: If a strategy has no rows, or a reference value is not positive.
+    """
+    parts = []
+    for name in (strategy, reference):
+        if name not in set(scores["strategy"]):
+            raise ValueError(f"no rows for the strategy {name!r}")
+    compared = scores[scores["strategy"] == strategy].set_index(key)
+    base = scores[scores["strategy"] == reference].set_index(key)
+    for measure, title in measures.items():
+        if (base[measure] <= 0).any():
+            raise ValueError(f"the reference value of {measure!r} must be positive")
+        change = 100.0 * (compared[measure] / base[measure] - 1.0)
+        parts.append(pd.DataFrame({"panel": title, "name": change.index, "value": change.to_numpy()}))
+    return pd.concat(parts, ignore_index=True)
+
+
+def change_by_strategy(
+    scores: pd.DataFrame,
+    measure: str,
+    reference: str,
+    strategies: list[str],
+    labels: dict[str, str],
+    panel: str = "cycles_seen",
+) -> pd.DataFrame:
+    """Change in percent of each strategy against a reference strategy, for each panel.
+
+    Args:
+        scores: Rows with ``strategy``, the ``panel`` column and the measure, such as the result of ``cold_start``.
+        measure: The measure column, for which lower is better.
+        reference: The strategy that is the reference, whose value is the zero of the change.
+        strategies: The strategies that are compared with it.
+        labels: Name of each strategy in the figure.
+        panel: Column whose values are the panels, such as the cycles of a new cell that the model has seen.
+
+    Returns:
+        Rows with ``panel`` (the title, with a letter and the value), ``name`` and ``value`` in percent.
+
+    Raises:
+        ValueError: If a reference value is not positive.
+    """
+    parts = []
+    for index, (value, rows) in enumerate(scores.groupby(panel, sort=True)):
+        base = rows.loc[rows["strategy"] == reference, measure].iloc[0]
+        if base <= 0:
+            raise ValueError(f"the reference value of {measure!r} must be positive")
+        for name in strategies:
+            now = rows.loc[rows["strategy"] == name, measure].iloc[0]
+            parts.append(
+                {
+                    "panel": f"({'abcdefgh'[index]}) {value:g} cycles seen",
+                    "name": labels[name],
+                    "value": 100.0 * (now / base - 1.0),
+                }
+            )
+    return pd.DataFrame(parts)
+
+
+def coverage_gap(
+    scores: pd.DataFrame,
+    nominal: float,
+    strategies: list[str],
+    labels: dict[str, str],
+    subject: str,
+    tolerance: float = 10.0,
+    panel: str = "cycles_seen",
+) -> pd.DataFrame:
+    """Coverage of each strategy minus the nominal coverage, in percentage points, with a role for each bar.
+
+    A strategy that falls short of the nominal coverage by more than ``tolerance`` points is over-confident and is
+    marked ``"worse"``. A strategy that exceeds it has intervals that are too wide, which the interval score
+    penalises, and is not marked. The subject strategy is marked ``"subject"`` otherwise.
+
+    Args:
+        scores: Rows with ``strategy``, the ``panel`` column and ``coverage``.
+        nominal: Nominal coverage as a share, for example 0.9.
+        strategies: Strategies to show, in the order of the rows.
+        labels: Name of each strategy in the figure.
+        subject: The strategy that the figure is about.
+        tolerance: Shortfall in points beyond which a bar is marked worse.
+        panel: Column whose values are the panels.
+
+    Returns:
+        Rows with ``panel``, ``name``, ``value`` (points) and ``role``.
+    """
+    parts = []
+    for index, (value, rows) in enumerate(scores.groupby(panel, sort=True)):
+        for name in strategies:
+            gap = 100.0 * (rows.loc[rows["strategy"] == name, "coverage"].iloc[0] - nominal)
+            role = "worse" if gap < -tolerance else ("subject" if name == subject else "other")
+            parts.append(
+                {
+                    "panel": f"({'abcdefgh'[index]}) {value:g} cycles seen",
+                    "name": labels[name],
+                    "value": gap,
+                    "role": role,
+                }
+            )
+    return pd.DataFrame(parts)

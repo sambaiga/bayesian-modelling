@@ -221,3 +221,6 @@ Thumbs.db
 *.class
 *.war
 *.jar
+
+# Claude Code settings and skills stay local
+.claude/
