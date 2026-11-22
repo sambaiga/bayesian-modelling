@@ -21,7 +21,6 @@ from lets_plot import (
     geom_text,
     geom_vline,
     ggplot,
-    ggsize,
     labs,
     scale_color_manual,
     scale_fill_manual,
@@ -34,7 +33,7 @@ from lets_plot import (
 import numpy as np
 import pandas as pd
 
-from .theme import BLUE, GREY, INK, ORANGE, SITE_FONT, SLATE, site_theme
+from .theme import BLUE, GREY, INK, ORANGE, SITE_FONT, SLATE, canvas, columns, site_theme
 
 STRATEGIES = {
     "none": "No pooling",
@@ -149,7 +148,7 @@ def curves(frame: pd.DataFrame, held_out: list[str], colours: dict[str, str], th
         + scale_x_continuous(limits=[0, drawn["cycle"].max() + 280])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
-        + ggsize(780, 340)
+        + canvas(780, 340)
     )
 
 
@@ -192,7 +191,7 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
         + scale_x_continuous(breaks=[0, 25, 50, 75, 100])
         + labs(x="State of health (%)", y="Density")
         + site_theme()
-        + ggsize(720, 330)
+        + canvas(720, 330)
     )
 
 
@@ -216,11 +215,11 @@ def chemistry(intervals: pd.DataFrame, colours: dict[str, str]):  # noqa: ANN201
         + label(
             frame.assign(x=frame["mean"], y=frame["row"] + 0.33, label=frame["mean"].map("{:.2f}".format)), hjust=0.5
         )
-        + facet_wrap("quantity", ncol=3, scales="free_x")
+        + facet_wrap("quantity", ncol=columns(3), scales="free_x")
         + scale_y_continuous(breaks=list(range(1, len(names) + 1)), labels=names, limits=[0.5, len(names) + 0.7])
         + labs(x="Posterior mean and 90% interval", y="")
         + site_theme()
-        + ggsize(840, 260)
+        + canvas(840, 260, 3, 3)
     )
 
 
@@ -253,12 +252,12 @@ def shrinkage(estimates: pd.DataFrame, means: pd.DataFrame, colours: dict[str, s
         )
         + scale_color_manual(values=colours)
         + scale_fill_manual(values={**colours, "none": "white"})
-        + facet_wrap("parameter", ncol=2, scales="free_y")
+        + facet_wrap("parameter", ncol=columns(2), scales="free_y")
         + scale_x_continuous(breaks=list(range(1, len(cells) + 1)), labels=cells)
         + labs(x="", y="")
         + site_theme()
         + theme(axis_text_x=element_text(angle=60, hjust=1, size=9))
-        + ggsize(840, 380)
+        + canvas(840, 380, 2, 2)
     )
 
 
@@ -271,16 +270,19 @@ def predictions(frame: pd.DataFrame):  # noqa: ANN201
     Returns:
         The figure.
     """
+    phone = columns(0, 1) == 1
+    drawn = frame.assign(panel=frame["method"] + ", " + frame["cell"]) if phone else frame
+    layout = facet_wrap("panel", ncol=1) if phone else facet_grid(x="method", y="cell")
     return (
-        ggplot(frame, aes("cycle"))
+        ggplot(drawn, aes("cycle"))
         + geom_ribbon(aes(ymin="lower", ymax="upper"), fill=tint(BLUE, 0.8), size=0)
         + geom_line(aes(y="median"), color=BLUE, size=1.0)
         + geom_point(aes(y="observed"), color=INK, shape=21, fill="white", size=1.6, stroke=0.7)
-        + facet_grid(x="method", y="cell")
+        + layout
         + scale_y_continuous(limits=[0, 110])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
-        + ggsize(840, 460)
+        + canvas(840, 460, frame["method"].nunique() * frame["cell"].nunique(), frame["method"].nunique(), 1)
     )
 
 
@@ -307,7 +309,7 @@ def loo(table: pd.DataFrame, best: str):  # noqa: ANN201
         + labs(x="Loss in expected log predictive density against the best model (smaller is better)", y="")
         + site_theme()
         + theme(axis_line_y=element_blank(), axis_ticks_y=element_blank())
-        + ggsize(780, 240)
+        + canvas(780, 240)
     )
 
 
@@ -325,11 +327,11 @@ def heldout(frame: pd.DataFrame):  # noqa: ANN201
         + geom_ribbon(aes(ymin="lower", ymax="upper"), fill=tint(BLUE, 0.8), size=0)
         + geom_line(aes(y="median"), color=BLUE, size=1.0)
         + geom_point(aes(y="observed"), color=INK, shape=21, fill="white", size=1.4, stroke=0.7)
-        + facet_wrap("cell", ncol=3, scales="free_x")
+        + facet_wrap("cell", ncol=columns(3, 2), scales="free_x")
         + scale_y_continuous(limits=[0, 110])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
-        + ggsize(900, 400)
+        + canvas(900, 400, frame["cell"].nunique(), 3, 2)
     )
 
 
@@ -351,5 +353,5 @@ def effects(table: pd.DataFrame):  # noqa: ANN201
         + scale_y_discrete(limits=list(ordered["feature"]))
         + labs(x="Effect on the logit of the state of health, per standard deviation", y="")
         + site_theme()
-        + ggsize(780, 240)
+        + canvas(780, 240)
     )

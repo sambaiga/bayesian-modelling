@@ -39,3 +39,16 @@ def test_a_role_column_replaces_the_colouring_by_sign_and_the_unit_is_printed():
     )
     svg = inline_svg(change.change(frame, "Nominal", ["a", "b"], ncol=1, unit=" pts"))
     assert "+10 pts" in svg and "\u221240 pts" in svg
+
+
+def test_show_builds_a_desktop_and_a_phone_variant_from_a_function(monkeypatch):
+    from bayes.plot import inline
+
+    shown = []
+    monkeypatch.setattr(inline, "display", lambda html: shown.append(html.data))
+    frame = pd.DataFrame({"panel": ["(a) A", "(b) B"], "name": ["x", "x"], "value": [-10.0, 20.0]})
+    inline.show(lambda: change.change(frame, "Reference", ["x"], ncol=2))
+    html = shown[0]
+    assert 'class="letsplot letsplot-desktop"' in html and 'class="letsplot letsplot-phone"' in html
+    wide, narrow = html.split('class="letsplot letsplot-phone"')
+    assert 'viewBox="0 0 900' in wide and 'viewBox="0 0 420' in narrow
