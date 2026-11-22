@@ -9,6 +9,7 @@ against. The lifetime of a machine is exponential with mean ``1 / theta``.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pymc as pm
 
 DAYS_PER_YEAR = 365.25
@@ -171,3 +172,19 @@ def exact_probability(shape: float, rate: float, years: float) -> float:
         The probability of failing within ``years``.
     """
     return float(1.0 - (rate / (rate + years)) ** shape)
+
+
+def decision_tiles_data(rows: list[dict]) -> tuple[pd.DataFrame, dict[tuple[str, str], str]]:
+    """The wide table and the printed labels of the decision figure, from one record for each prior.
+
+    Args:
+        rows: Records with ``prior``, ``median``, ``low``, ``high``, ``p1``, ``p3``, ``cost`` and ``probability``.
+
+    Returns:
+        The table indexed by prior, and the labels that replace a bare number: the median life with its interval.
+    """
+    frame = pd.DataFrame(rows).set_index("prior")
+    labels = {
+        ("median", prior): f"{r['median']:.1f} ({r['low']:.1f} to {r['high']:.1f})" for prior, r in frame.iterrows()
+    }
+    return frame, labels
