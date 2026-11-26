@@ -75,3 +75,97 @@ def test_effects_orders_the_diagnostics_by_their_mean():
     spec = hierarchy.effects(table).as_dict()
     discrete = [scale for scale in spec["scales"] if scale.get("aesthetic") == "y"][0]
     assert discrete["limits"] == ["y", "z", "x"]
+
+
+def one_cell_frame() -> pd.DataFrame:
+    cycles = np.arange(50.0, 650.0, 50.0)
+    rows = []
+    for cell, chemistry, offset in (("A_1", "A", 0.0), ("B_1", "B", 5.0)):
+        rows.append(
+            pd.DataFrame(
+                {
+                    "cell": cell,
+                    "CellType": chemistry,
+                    "cycle": cycles,
+                    "soh": 100 - cycles / 20 + offset,
+                    "median": 100 - cycles / 20 + offset,
+                    "lower": 95 - cycles / 20 + offset,
+                    "upper": 105 - cycles / 20 + offset,
+                }
+            )
+        )
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_bands_name_the_cells_mark_the_cycles_seen_and_use_the_colour_of_the_chemistry():
+    colours = hierarchy.palette(["A", "B"])
+    spec = hierarchy.bands(one_cell_frame(), colours, seen=100).as_dict()
+    assert {"A_1", "B_1", "Median", "90% interval", "Observation"} <= labels_of(spec)
+    assert {"End of life, 80%", "Cycles seen"} <= labels_of(spec)
+    assert "Cycles seen" not in labels_of(hierarchy.bands(one_cell_frame(), colours, seen=0).as_dict())
+    assert "<svg" in inline_svg(hierarchy.bands(one_cell_frame(), colours))
+
+
+def prior_posterior_frame() -> pd.DataFrame:
+    generator = np.random.default_rng(0)
+    rows = [pd.DataFrame({"quantity": "Q", "source": "Prior", "value": generator.normal(0, 2, 400)})]
+    for name, centre in (("A", -1.0), ("B", 1.0)):
+        rows.append(pd.DataFrame({"quantity": "Q", "source": name, "value": generator.normal(centre, 0.2, 400)}))
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_priors_label_the_prior_and_each_posterior_and_draw_only_the_requested_quantity():
+    frame = pd.concat([prior_posterior_frame(), prior_posterior_frame().assign(quantity="Other")])
+    spec = hierarchy.priors(frame, "Q", hierarchy.palette(["A", "B"])).as_dict()
+    assert labels_of(spec) == {"Prior", "A", "B"}
+
+
+def test_sensitivity_overlays_one_density_for_each_prior_with_a_legend_for_one_chemistry():
+    generator = np.random.default_rng(0)
+    rows = [
+        pd.DataFrame({"setting": setting, "chemistry": chemistry, "value": generator.normal(centre, 0.3, 300)})
+        for setting in ("Narrow", "Default", "Wide")
+        for chemistry, centre in (("A", -0.3), ("B", 0.7))
+    ]
+    draws = pd.concat(rows, ignore_index=True)
+    spec = hierarchy.sensitivity(draws, "A").as_dict()
+    assert spec["theme"]["legend_position"] == "top"
+    assert len(set(spec["data"]["distribution"])) == 3 and len(spec["data"]["value"]) == 900  # one chemistry
+    assert "<svg" in inline_svg(hierarchy.sensitivity(draws, "B"))
+
+
+def test_value_draws_one_line_for_each_strategy_and_names_it_at_its_end():
+    ratios = np.linspace(0.1, 0.9, 5)
+    frame = pd.concat(
+        [
+            pd.DataFrame({"strategy": name, "ratio": ratios, "value": level})
+            for name, level in (("partial", 0.4), ("complete", 0.2), ("none", -0.5), ("control", -3.0))
+        ]
+    )
+    spec = hierarchy.value(frame).as_dict()
+    assert labels_of(spec) == {"Partial pooling", "Complete pooling", "No pooling", "Control, no diagnostics"}
+    assert min(spec["data"]["drawn"]) == -1.0  # the control is drawn at the floor, and its label is there too
+
+
+def test_chemistry_draws_the_requested_parameter_alone():
+    table = pd.DataFrame(
+        {
+            "quantity": ["P", "P", "Q", "Q"],
+            "chemistry": ["A", "B", "A", "B"],
+            "mean": [1.0, 2.0, 3.0, 4.0],
+            "lower": [0.5, 1.5, 2.5, 3.5],
+            "upper": [1.5, 2.5, 3.5, 4.5],
+        }
+    )
+    colours = hierarchy.palette(["A", "B"])
+    assert labels_of(hierarchy.chemistry(table, colours, "Q").as_dict()) == {"3.00", "4.00"}
+    assert hierarchy.chemistry(table, colours).as_dict()["facet"]["name"] == "wrap"
+
+
+def test_priors_keep_the_draws_inside_the_axis_so_that_nothing_is_clipped():
+    frame = prior_posterior_frame()
+    spec = hierarchy.priors(frame, "Q", hierarchy.palette(["A", "B"])).as_dict()
+    values = np.asarray(spec["data"]["value"], dtype=float)
+    axis = [scale for scale in spec["scales"] if scale.get("aesthetic") == "x"][0]["limits"]
+    assert values.min() >= axis[0] and values.max() <= axis[1]
+    assert len(values) < len(frame)  # the extreme tails are dropped

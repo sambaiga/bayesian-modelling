@@ -25,6 +25,7 @@ from lets_plot import (
     scale_color_manual,
     scale_fill_manual,
     scale_linetype_manual,
+    scale_size_manual,
     scale_x_continuous,
     scale_y_continuous,
     scale_y_discrete,
@@ -33,6 +34,7 @@ from lets_plot import (
 import numpy as np
 import pandas as pd
 
+from .distribution import plot_density
 from .theme import BLUE, GREY, INK, ORANGE, SITE_FONT, SLATE, canvas, columns, site_theme
 
 STRATEGIES = {
@@ -195,19 +197,26 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
     )
 
 
-def chemistry(intervals: pd.DataFrame, colours: dict[str, str]):  # noqa: ANN201
-    """Posterior mean and interval of the chemistry parameters, one panel per parameter.
+def chemistry(  # noqa: ANN201
+    intervals: pd.DataFrame, colours: dict[str, str], quantity: str | None = None, size: tuple[int, int] = (780, 190)
+):
+    """Posterior mean and interval of a chemistry parameter, one row for each chemistry.
 
     Args:
         intervals: Rows with ``quantity``, ``chemistry``, ``mean``, ``lower`` and ``upper``.
         colours: Colour of each chemistry.
+        quantity: The parameter to draw, so that each parameter is a subfigure of its own; every parameter in one panel
+            each when ``None``.
+        size: Width and height of a figure with one parameter, in pixels.
 
     Returns:
         The figure.
     """
     names = list(colours)
-    frame = intervals.assign(row=intervals["chemistry"].map({name: index + 1 for index, name in enumerate(names)}))
-    return (
+    frame = intervals if quantity is None else intervals[intervals["quantity"] == quantity]
+    frame = frame.assign(row=frame["chemistry"].map({name: index + 1 for index, name in enumerate(names)}))
+    panels = frame["quantity"].nunique()
+    plot = (
         ggplot(frame)
         + geom_segment(aes(x="lower", xend="upper", y="row", yend="row", color="chemistry"), size=1.8)
         + geom_point(aes("mean", "row", color="chemistry"), shape=21, fill="white", size=4.5, stroke=1.7)
@@ -215,15 +224,22 @@ def chemistry(intervals: pd.DataFrame, colours: dict[str, str]):  # noqa: ANN201
         + label(
             frame.assign(x=frame["mean"], y=frame["row"] + 0.33, label=frame["mean"].map("{:.2f}".format)), hjust=0.5
         )
-        + facet_wrap("quantity", ncol=columns(3), scales="free_x")
         + scale_y_continuous(breaks=list(range(1, len(names) + 1)), labels=names, limits=[0.5, len(names) + 0.7])
-        + labs(x="Posterior mean and 90% interval", y="")
+        + labs(x=quantity or "Posterior mean and 90% interval", y="")
         + site_theme()
-        + canvas(840, 260, 3, 3)
     )
+    if panels > 1:
+        return plot + facet_wrap("quantity", ncol=columns(3), scales="free_x") + canvas(840, 260, 3, 3)
+    return plot + canvas(*size)
 
 
-def shrinkage(estimates: pd.DataFrame, means: pd.DataFrame, colours: dict[str, str], cells: list[str]):  # noqa: ANN201
+def shrinkage(  # noqa: ANN201
+    estimates: pd.DataFrame,
+    means: pd.DataFrame,
+    colours: dict[str, str],
+    cells: list[str],
+    parameter: str | None = None,
+):
     """Per-cell estimates without pooling and with partial pooling, joined by a segment, against the chemistry mean.
 
     Args:
@@ -232,10 +248,13 @@ def shrinkage(estimates: pd.DataFrame, means: pd.DataFrame, colours: dict[str, s
         means: Rows with ``parameter``, ``chemistry``, ``x0``, ``x1`` and ``value``: the span and level of a chemistry.
         colours: Colour of each chemistry.
         cells: Cells in the order of the horizontal axis.
+        parameter: The parameter to draw, so that each is a subfigure of its own; both in one figure when ``None``.
 
     Returns:
         The figure.
     """
+    if parameter is not None:
+        estimates, means = estimates[estimates["parameter"] == parameter], means[means["parameter"] == parameter]
     frame = estimates.assign(position=estimates["cell"].map({cell: index + 1 for index, cell in enumerate(cells)}))
     frame["fill"] = np.where(frame["method"] == "Partial pooling", frame["chemistry"], "none")
     wide = frame.pivot_table(index=["parameter", "cell", "position"], columns="method", values="mean").reset_index()
@@ -252,37 +271,234 @@ def shrinkage(estimates: pd.DataFrame, means: pd.DataFrame, colours: dict[str, s
         )
         + scale_color_manual(values=colours)
         + scale_fill_manual(values={**colours, "none": "white"})
-        + facet_wrap("parameter", ncol=columns(2), scales="free_y")
         + scale_x_continuous(breaks=list(range(1, len(cells) + 1)), labels=cells)
-        + labs(x="", y="")
+        + labs(x="", y=parameter or "")
         + site_theme()
         + theme(axis_text_x=element_text(angle=60, hjust=1, size=9))
-        + canvas(840, 380, 2, 2)
+        + (
+            canvas(780, 300)
+            if parameter
+            else facet_wrap("parameter", ncol=columns(2), scales="free_y") + canvas(840, 380, 2, 2)
+        )
     )
 
 
-def predictions(frame: pd.DataFrame):  # noqa: ANN201
-    """Median and 90% interval of each strategy against the observed state of health, one row per cell.
+def bands(  # noqa: ANN201
+    frame: pd.DataFrame,
+    colours: dict[str, str],
+    seen: int = 0,
+    threshold: float = 80.0,
+    size: tuple[int, int] = (780, 340),
+):
+    """Median and 90% interval of one strategy for the held-out cells, with the observations and a key.
+
+    The band and the median take the colour of the chemistry of the cell. A band that the observations leave is the
+    picture of an over-confident prediction. The key above the plot names every kind of mark: the median, the interval,
+    the observations, the end-of-life threshold and, when the model has seen cycles, the cycles seen. The cells are
+    named at the ends of their lines.
 
     Args:
-        frame: Rows with ``cell``, ``method``, ``cycle``, ``observed``, ``median``, ``lower`` and ``upper``.
+        frame: Rows of one strategy and one number of cycles seen, with ``cell``, ``CellType``, ``cycle``, ``soh``,
+            ``median``, ``lower`` and ``upper``.
+        colours: Colour of each chemistry.
+        seen: Cycles of the cell that the model has seen; a dashed line marks them when positive.
+        threshold: End-of-life threshold in percent.
+        size: Width and height of the figure in pixels.
 
     Returns:
         The figure.
     """
-    phone = columns(0, 1) == 1
-    drawn = frame.assign(panel=frame["method"] + ", " + frame["cell"]) if phone else frame
-    layout = facet_wrap("panel", ncol=1) if phone else facet_grid(x="method", y="cell")
+    ends = frame.sort_values("cycle").groupby("cell").tail(1)
+    ends = ends.assign(x=ends["cycle"] + 40, y=ends["median"], label=ends["cell"])
+    reach = float(frame["cycle"].max())
+    width = reach + 300
+    plot = (
+        ggplot(frame, aes("cycle"))
+        + geom_hline(yintercept=threshold, color=SLATE, linetype="dotted", size=0.5)
+        + geom_ribbon(aes(ymin="lower", ymax="upper", group="cell", fill="CellType"), size=0)
+        + scale_fill_manual(values={name: tint(colour, 0.75) for name, colour in colours.items()})
+        + geom_line(aes(y="median", group="cell", color="CellType"), size=1.2)
+        + scale_color_manual(values=colours)
+        + geom_point(aes(y="soh", group="cell"), color=INK, shape=21, fill="white", size=1.4, stroke=0.6)
+        + label(ends, INK, size=5.4)
+    )
+    if seen:
+        plot += geom_vline(xintercept=seen, color=SLATE, linetype="dashed", size=0.6)
+    # the key: two rows above the plot, one entry for each kind of mark; the colour of a chemistry is named at the lines
+    swatch = width * 0.07
+    columns_at = [width * 0.02, width * 0.36, width * 0.70]
+    first, second = 126.0, 117.0
+
+    def entry(kind: str, text: str, x0: float, y: float) -> list:
+        line = pd.DataFrame({"x0": [x0], "x1": [x0 + swatch], "y": [y]})
+        spec = aes(x="x0", xend="x1", y="y", yend="y")
+        if kind == "median":
+            marks = [geom_segment(spec, data=line, color=SLATE, size=1.2, inherit_aes=False)]
+        elif kind == "interval":
+            marks = [geom_segment(spec, data=line, color=tint(SLATE, 0.7), size=6.0, inherit_aes=False)]
+        elif kind == "point":
+            point = pd.DataFrame({"x": [x0 + swatch / 2], "y": [y]})
+            marks = [
+                geom_point(
+                    aes("x", "y"),
+                    data=point,
+                    color=INK,
+                    shape=21,
+                    fill="white",
+                    size=1.8,
+                    stroke=0.7,
+                    inherit_aes=False,
+                )
+            ]
+        else:
+            marks = [geom_segment(spec, data=line, color=SLATE, linetype=kind, size=0.7, inherit_aes=False)]
+        words = pd.DataFrame({"x": [x0 + swatch * 1.25], "y": [y], "label": [text]})
+        return [*marks, label(words, INK, size=4.8)]
+
+    rows = [
+        ("median", "Median", columns_at[0], first),
+        ("interval", "90% interval", columns_at[1], first),
+        ("point", "Observation", columns_at[2], first),
+        ("dotted", f"End of life, {threshold:.0f}%", columns_at[0], second),
+    ]
+    if seen:
+        rows.append(("dashed", "Cycles seen", columns_at[1], second))
+    for kind, text, x0, y in rows:
+        for layer in entry(kind, text, x0, y):
+            plot += layer
     return (
-        ggplot(drawn, aes("cycle"))
-        + geom_ribbon(aes(ymin="lower", ymax="upper"), fill=tint(BLUE, 0.8), size=0)
-        + geom_line(aes(y="median"), color=BLUE, size=1.0)
-        + geom_point(aes(y="observed"), color=INK, shape=21, fill="white", size=1.6, stroke=0.7)
-        + layout
-        + scale_y_continuous(limits=[0, 110])
+        plot
+        + scale_x_continuous(limits=[0, width])
+        + scale_y_continuous(limits=[0, 132], breaks=[0, 20, 40, 60, 80, 100])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
-        + canvas(840, 460, frame["method"].nunique() * frame["cell"].nunique(), frame["method"].nunique(), 1)
+        + canvas(*size)
+    )
+
+
+def priors(frame: pd.DataFrame, quantity: str, colours: dict[str, str]):  # noqa: ANN201
+    """The prior of a parameter and its posterior, as densities on one axis, to show what the data taught the model.
+
+    Args:
+        frame: Rows with ``quantity``, ``source`` and ``value``, from ``hierarchical.prior_posterior``.
+        quantity: The parameter to draw.
+        colours: Colour of each chemistry.
+
+    Returns:
+        The figure.
+    """
+    rows = frame[frame["quantity"] == quantity]
+    low, high = np.percentile(rows["value"], [0.5, 99.5])  # the long tails of a prior would flatten the figure
+    rows = rows[rows["value"].between(low, high)]  # dropped here, so that the axis never has to clip draws
+    shades = {"Prior": SLATE, "Posterior": BLUE, **colours}
+    peaks = []
+    for source in dict.fromkeys(rows["source"]):
+        heights, edges = np.histogram(rows.loc[rows["source"] == source, "value"], bins=60, density=True)
+        top = int(np.argmax(heights))
+        peaks.append(
+            {
+                "x": float((edges[top] + edges[top + 1]) / 2),
+                "y": float(heights[top]) * 1.07,
+                "label": source,
+                "source": source,
+            }
+        )
+    peaks = pd.DataFrame(peaks)
+    plot = ggplot(rows, aes("value", color="source", fill="source")) + geom_density(size=1.0, alpha=0.2, trim=True)
+    for source in peaks["source"]:
+        plot += label(peaks[peaks["source"] == source], INK, hjust=0.5, size=5.4)
+    return (
+        plot
+        + scale_color_manual(values=shades)
+        + scale_fill_manual(values=shades)
+        + scale_x_continuous(limits=[float(rows["value"].min()), float(rows["value"].max())])
+        + labs(x=quantity, y="")
+        + theme(axis_line_y=element_blank(), axis_text_y=element_blank(), axis_ticks_y=element_blank())
+        + site_theme()
+        + canvas(440, 270)
+    )
+
+
+def sensitivity(draws: pd.DataFrame, chemistry: str, quantity: str = "Log rate (per 1,000 cycles)"):  # noqa: ANN201
+    """The posterior of a chemistry parameter under several priors, as overlaid densities with a legend.
+
+    The curves of one chemistry lie on top of one another when the prior does not decide the answer. The densities are
+    drawn by ``bayes.plot.distribution.plot_density``, one panel for each chemistry so that each is a subfigure.
+
+    Args:
+        draws: Rows from ``hierarchical.sensitivity_draws`` with ``setting``, ``chemistry`` and ``value``.
+        chemistry: The chemistry to draw.
+        quantity: Name of the parameter, for the axis.
+
+    Returns:
+        The figure.
+    """
+    rows = draws[draws["chemistry"] == chemistry].rename(columns={"setting": "distribution"})
+    shades = [SLATE, BLUE, tint(BLUE, 0.5)]  # the default prior is the subject; the other two recede
+    plot = plot_density(
+        rows,
+        title=None,
+        x_label=quantity,
+        y_label="",
+        colours=shades[: rows["distribution"].nunique()],
+        line_size=1.6,
+        theme=None,
+    )
+    return (
+        plot
+        + site_theme()
+        + theme(
+            legend_position="top",
+            legend_title=element_blank(),
+            axis_line_y=element_blank(),
+            axis_text_y=element_blank(),
+            axis_ticks_y=element_blank(),
+            axis_title_x=element_text(face="plain", size=11),
+        )
+        + canvas(440, 300)
+    )
+
+
+def value(frame: pd.DataFrame, floor: float = -1.0):  # noqa: ANN201
+    """Relative economic value of each strategy against the cost-loss ratio, for one number of cycles seen.
+
+    Args:
+        frame: Rows of one number of cycles seen with ``strategy``, ``ratio`` and ``value``.
+        floor: Lowest value drawn; a curve that falls below it is drawn at it and its label says where it goes.
+
+    Returns:
+        The figure.
+    """
+    shown = frame.dropna(subset=["value"]).assign(name=lambda rows: rows["strategy"].map(STRATEGIES))
+    shown = shown.assign(drawn=shown["value"].clip(lower=floor))
+    look = {
+        "Partial pooling": (BLUE, 1.5, "solid"),
+        "Complete pooling": (SLATE, 1.0, "solid"),
+        "No pooling": (SLATE, 1.0, "dashed"),
+        "Complete pooling, no diagnostics": (GREY, 1.4, "dotted"),
+    }
+    ends = shown.sort_values("ratio").groupby("name").tail(1)
+    y = spread([max(float(v), floor) for v in ends["drawn"]], 0.14)
+    names = ends.assign(
+        x=ends["ratio"] + 0.02,
+        y=y,
+        label=ends["name"].map(lambda n: n.replace("Complete pooling, no diagnostics", "Control, no diagnostics")),
+    )
+    plot = ggplot(shown, aes("ratio", "drawn", group="name", color="name", linetype="name")) + geom_hline(
+        yintercept=0.0, color=SLATE, linetype="dotted", size=0.5
+    )
+    plot += geom_line(aes(size="name"))
+    return (
+        plot
+        + scale_color_manual(values={name: look[name][0] for name in look})
+        + scale_linetype_manual(values={name: look[name][2] for name in look})
+        + scale_size_manual(values={name: look[name][1] for name in look})
+        + label(names, INK, size=5.2)
+        + scale_x_continuous(limits=[0.0, 1.0 + 0.34], breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        + scale_y_continuous(limits=[floor - 0.05, 1.0])
+        + labs(x="Cost-loss ratio of retiring a cell", y="Relative economic value")
+        + site_theme()
+        + canvas(780, 340)
     )
 
 

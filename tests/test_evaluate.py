@@ -66,16 +66,19 @@ def test_cold_start_scores_every_setting_on_the_same_window_and_reuses_stored_fi
     train = cells[~cells["cell"].isin(["X2", "Y2"])].reset_index(drop=True)
     scaler = StandardScaler().fit(train[FEATURES])
     tiny = {"draws": 20, "tune": 20, "chains": 2}
-    scores, diagnostics, curves = evaluate.cold_start(
-        train, held, scaler, FEATURES, (0, 150), 60, tiny, tiny, tmp_path, draws=30
-    )
+    result = evaluate.cold_start(train, held, scaler, FEATURES, (0, 150), 60, tiny, tiny, tmp_path, draws=30)
+    scores, diagnostics, curves, windows = result
+    assert isinstance(result, evaluate.ColdStart)
     assert set(scores["strategy"]) == set(evaluate.STRATEGY) and set(scores["cycles_seen"]) == {0, 150}
     assert scores.groupby("strategy")["n"].nunique().eq(1).all()  # the scored window does not depend on the cycles seen
     assert scores["n"].iloc[0] == int((held["cycle"] > 150 + 60).sum())
     assert len(diagnostics) == len(scores) and {"r_hat", "ess_bulk", "divergences"} <= set(diagnostics.columns)
-    assert len(curves) == len(evaluate.STRATEGY) * len(held)
+    # the predictions for the whole life of the held-out cells exist for every setting, and so do the probabilities
+    assert len(curves) == len(evaluate.STRATEGY) * 2 * len(held) and set(curves["cycles_seen"]) == {0, 150}
+    assert len(windows) == int(scores["n"].sum()) and windows["p_below"].between(0.0, 1.0).all()
+    assert set(windows["strategy"]) == set(evaluate.STRATEGY) and set(windows["cycles_seen"]) == {0, 150}
     assert len(list(tmp_path.glob("*.nc"))) == len(scores)
-    again, _, _ = evaluate.cold_start(train, held, scaler, FEATURES, (0, 150), 60, tiny, tiny, tmp_path, draws=30)
+    again = evaluate.cold_start(train, held, scaler, FEATURES, (0, 150), 60, tiny, tiny, tmp_path, draws=30).scores
     assert again["mae"].round(6).tolist() == scores["mae"].round(6).tolist()
 
 

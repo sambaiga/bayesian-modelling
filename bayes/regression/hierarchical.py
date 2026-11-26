@@ -42,6 +42,7 @@ def hierarchical_model(
     diagnostics: bool = True,
     cell: str = "cell",
     chemistry: str = "CellType",
+    phi_prior: tuple[float, float] = (float(np.log(100.0)), 1.0),
 ) -> pm.Model:
     """Beta regression of the state of health on the cycle and on diagnostics, at one of three levels of pooling.
 
@@ -60,6 +61,8 @@ def hierarchical_model(
         diagnostics: Whether the diagnostics enter the model; ``False`` is the control without them.
         cell: Name of the cell column.
         chemistry: Name of the chemistry column.
+        phi_prior: Mean and standard deviation of the logarithm of the precision ``phi``, which has a log-normal prior.
+            The default is centred on 100, a noise of about five points of state of health at mid-life.
 
     Returns:
         The PyMC model, with the observations of ``y`` attached.
@@ -76,7 +79,7 @@ def hierarchical_model(
     with pm.Model(coords=coords) as model:
         cycle = pm.Data("cycle", frame["cycle"].to_numpy() / CYCLE_UNIT, dims="obs")
         inputs = pm.Data("diagnostics", scaler.transform(frame[features]), dims=("obs", "feature"))
-        phi = pm.LogNormal("phi", np.log(100.0), 1.0)
+        phi = pm.LogNormal("phi", phi_prior[0], phi_prior[1])
 
         if pooling == "partial":
             mu_alpha = pm.Normal("mu_alpha", 2.0, 1.0)
@@ -362,3 +365,94 @@ def shrinkage_frames(
     frame = pd.concat(estimates, ignore_index=True)
     frame["chemistry"] = frame["cell"].map(chemistry_of)
     return frame, pd.DataFrame(means)
+
+
+PRIOR_LEVELS = {
+    "alpha_chem": "Initial level (logit)",
+    "loglambda_chem": "Log rate (per 1,000 cycles)",
+    "amplitude_chem": "Amplitude (logit units)",
+}
+
+
+def prior_posterior(
+    prior: az.InferenceData, posterior: az.InferenceData, draws: int = 4000, seed: int = 0
+) -> pd.DataFrame:
+    """Draws of each chemistry parameter and of the precision from the prior and from the posterior, to be compared.
+
+    The prior of a chemistry parameter is the same for every chemistry, so its draws are pooled; the posterior has one
+    set of draws per chemistry. The precision has one posterior, shown on the logarithmic scale because it lies far
+    from its prior.
+
+    Args:
+        prior: Prior draws of a partial-pooling model, from ``pymc.sample_prior_predictive``.
+        posterior: Inference data of the partial-pooling fit.
+        draws: Draws kept for each source, so that the frame stays small.
+        seed: Seed of the thinning.
+
+    Returns:
+        Rows with ``quantity``, ``source`` (``"Prior"``, a chemistry, or ``"Posterior"`` for the precision) and
+        ``value``.
+    """
+    generator = np.random.default_rng(seed)
+
+    def thin(values: np.ndarray) -> np.ndarray:
+        values = np.asarray(values).ravel()
+        return generator.choice(values, size=min(draws, values.size), replace=False)
+
+    rows = []
+    for variable, quantity in PRIOR_LEVELS.items():
+        rows.append(pd.DataFrame({"quantity": quantity, "source": "Prior", "value": thin(prior.prior[variable])}))
+        for chemistry in posterior.posterior[variable]["chemistry"].to_numpy():
+            values = thin(posterior.posterior[variable].sel(chemistry=chemistry))
+            rows.append(pd.DataFrame({"quantity": quantity, "source": str(chemistry), "value": values}))
+    precision = "Precision (log10)"
+    rows.append(pd.DataFrame({"quantity": precision, "source": "Prior", "value": np.log10(thin(prior.prior["phi"]))}))
+    rows.append(
+        pd.DataFrame(
+            {"quantity": precision, "source": "Posterior", "value": np.log10(thin(posterior.posterior["phi"]))}
+        )
+    )
+    return pd.concat(rows, ignore_index=True)
+
+
+def prior_sensitivity(fits: dict[str, az.InferenceData], probability: float = 0.9) -> pd.DataFrame:
+    """Chemistry parameters of fits that differ only in a prior, with the probability that one rate exceeds the other.
+
+    Args:
+        fits: Partial-pooling fits keyed by the name of the prior setting, in the order to be shown.
+        probability: Probability mass of the interval.
+
+    Returns:
+        The rows of ``chemistry_intervals`` for every setting, with a ``setting`` column, and for each setting the
+        posterior mean of the precision in ``precision``.
+    """
+    frames = []
+    for setting, idata in fits.items():
+        precision = float(idata.posterior["phi"].mean())
+        frames.append(chemistry_intervals(idata, probability).assign(setting=setting, precision=precision))
+    return pd.concat(frames, ignore_index=True)
+
+
+def sensitivity_draws(
+    fits: dict[str, az.InferenceData], variable: str = "loglambda_chem", draws: int = 2000, seed: int = 0
+) -> pd.DataFrame:
+    """Posterior draws of a chemistry parameter under each setting, to be drawn over one another.
+
+    Args:
+        fits: Partial-pooling fits keyed by the name of the prior setting, in the order to be shown.
+        variable: Name of the chemistry parameter, for example ``"loglambda_chem"``.
+        draws: Draws kept for each setting and chemistry.
+        seed: Seed of the thinning.
+
+    Returns:
+        Rows with ``setting``, ``chemistry`` and ``value``.
+    """
+    generator = np.random.default_rng(seed)
+    rows = []
+    for setting, idata in fits.items():
+        stacked = idata.posterior[variable].stack(sample=("chain", "draw"))
+        for chemistry in stacked["chemistry"].to_numpy():
+            values = stacked.sel(chemistry=chemistry).to_numpy()
+            kept = generator.choice(values, size=min(draws, values.size), replace=False)
+            rows.append(pd.DataFrame({"setting": setting, "chemistry": str(chemistry), "value": kept}))
+    return pd.concat(rows, ignore_index=True)

@@ -197,3 +197,52 @@ def test_a_prediction_repeats_with_the_same_seed_and_differs_with_another(fitted
     second = hier.predict(fitted[1], "partial", rows, scaler, FEATURES, "Y", seed=3, draws=15)
     other = hier.predict(fitted[1], "partial", rows, scaler, FEATURES, "Y", seed=4, draws=15)
     assert np.array_equal(first, second) and not np.array_equal(first, other)
+
+
+def test_the_prior_of_the_precision_is_an_argument(frame, scaler):
+    tight = hier.hierarchical_model(frame, scaler, FEATURES, "partial", phi_prior=(float(np.log(100.0)), 0.3))
+    wide = hier.hierarchical_model(frame, scaler, FEATURES, "partial", phi_prior=(float(np.log(1000.0)), 1.5))
+    with tight:
+        low = pm.draw(tight["phi"], draws=2000, random_seed=1)
+    with wide:
+        high = pm.draw(wide["phi"], draws=2000, random_seed=1)
+    assert np.median(low) == pytest.approx(100.0, rel=0.15) and np.median(high) == pytest.approx(1000.0, rel=0.2)
+    assert high.std() > low.std()
+
+
+def test_prior_posterior_gives_the_prior_once_and_the_posterior_for_each_chemistry():
+    levels = {name: (("chemistry",), [1.0, 2.0]) for name in hier.PRIOR_LEVELS}
+    fit = posterior(**levels, phi=((), 1500.0))
+    prior = az.InferenceData(
+        prior=xr.Dataset(
+            {
+                **{name: (("chain", "draw", "chemistry"), np.zeros((1, 100, 2))) for name in hier.PRIOR_LEVELS},
+                "phi": (("chain", "draw"), np.full((1, 100), 100.0)),
+            },
+            coords={"chemistry": ["X", "Y"]},
+        )
+    )
+    frame = hier.prior_posterior(prior, fit, draws=40)
+    assert set(frame["quantity"]) == {*hier.PRIOR_LEVELS.values(), "Precision (log10)"}
+    sources = frame[frame["quantity"] == "Initial level (logit)"]["source"].unique()
+    assert set(sources) == {"Prior", "X", "Y"}
+    precision = frame[frame["quantity"] == "Precision (log10)"].groupby("source")["value"].mean().round(2)
+    assert precision.to_dict() == {"Prior": 2.0, "Posterior": 3.18}
+    assert frame.groupby(["quantity", "source"]).size().max() == 40
+
+
+def test_prior_sensitivity_has_a_row_set_for_each_setting_and_the_precision_of_the_fit():
+    levels = {name: (("chemistry",), [1.0, 2.0]) for name in hier.PRIOR_LEVELS}
+    fits = {"Narrow": posterior(**levels, phi=((), 100.0)), "Wide": posterior(**levels, phi=((), 900.0))}
+    table = hier.prior_sensitivity(fits)
+    assert list(table["setting"].unique()) == ["Narrow", "Wide"] and len(table) == 2 * 3 * 2
+    assert table.groupby("setting")["precision"].first().tolist() == [100.0, 900.0]
+
+
+def test_sensitivity_draws_keep_the_setting_and_the_chemistry_of_each_draw():
+    levels = {name: (("chemistry",), [1.0, 2.0]) for name in hier.PRIOR_LEVELS}
+    fits = {"Narrow": posterior(**levels, phi=((), 100.0)), "Wide": posterior(**levels, phi=((), 900.0))}
+    draws = hier.sensitivity_draws(fits, "alpha_chem", draws=30)
+    assert set(draws["setting"]) == {"Narrow", "Wide"} and set(draws["chemistry"]) == {"X", "Y"}
+    assert draws.groupby(["setting", "chemistry"]).size().eq(30).all()
+    assert draws.groupby("chemistry")["value"].mean().round(2).to_dict() == {"X": 1.0, "Y": 2.0}

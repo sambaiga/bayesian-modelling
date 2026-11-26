@@ -52,3 +52,30 @@ def test_show_builds_a_desktop_and_a_phone_variant_from_a_function(monkeypatch):
     assert 'class="letsplot letsplot-desktop"' in html and 'class="letsplot letsplot-phone"' in html
     wide, narrow = html.split('class="letsplot letsplot-phone"')
     assert 'viewBox="0 0 900' in wide and 'viewBox="0 0 420' in narrow
+
+
+def test_a_panel_drawn_alone_takes_its_axis_from_the_whole_figure():
+    frame = pd.DataFrame(
+        {"panel": ["(a)"] * 2 + ["(b)"] * 2, "name": ["a", "b"] * 2, "value": [-5.0, 10.0, -80.0, 200.0]}
+    )
+    alone = change.change(frame[frame["panel"] == "(a)"], "Ref", ["a", "b"], ncol=1)
+    shared = change.change(frame[frame["panel"] == "(a)"], "Ref", ["a", "b"], ncol=1, scale=frame)
+
+    def limits(figure):
+        return [scale for scale in figure.as_dict()["scales"] if scale.get("aesthetic") == "x"][0]["limits"]
+
+    assert limits(shared)[1] > limits(alone)[1] and limits(shared)[0] < limits(alone)[0]
+
+
+def test_a_single_panel_has_no_strip_title_because_a_subfigure_carries_its_own_caption():
+    frame = pd.DataFrame({"panel": ["(a) One"] * 2, "name": ["a", "b"], "value": [-5.0, 10.0]})
+    spec = change.change(frame, "Ref", ["a", "b"], ncol=1).as_dict()
+    assert "facet" not in spec or spec["facet"]["name"] != "wrap"
+
+
+def test_a_panel_whose_bars_all_point_the_same_way_still_draws_and_prints_every_value():
+    frame = pd.DataFrame({"panel": ["(a)"] * 3, "name": ["a", "b", "c"], "value": [69.0, 296.0, 226.0]})
+    svg = inline_svg(change.change(frame, "Ref", ["a", "b", "c"], ncol=1))
+    assert "+296%" in svg and "+69%" in svg and "Exception" not in svg
+    negative = frame.assign(value=[-5.0, -40.0, -20.0])
+    assert "\u221240%" in inline_svg(change.change(negative, "Ref", ["a", "b", "c"], ncol=1))
