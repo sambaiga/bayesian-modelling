@@ -1,0 +1,8 @@
+bootstrap-icons.ttf is derived from Bootstrap Icons v1.13.1
+(https://icons.getbootstrap.com/), Copyright 2019-2024 The Bootstrap
+Authors, licensed under MIT (https://github.com/twbs/icons/blob/main/LICENSE).
+
+Converted from the upstream .woff to .ttf with fontTools
+(matplotlib's bundled FreeType cannot open .woff directly), no glyphs
+added, removed, or modified. bayes/plot/icons.py looks glyphs up by
+icon name through the font's character map.
