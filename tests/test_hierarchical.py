@@ -246,3 +246,15 @@ def test_sensitivity_draws_keep_the_setting_and_the_chemistry_of_each_draw():
     assert set(draws["setting"]) == {"Narrow", "Wide"} and set(draws["chemistry"]) == {"X", "Y"}
     assert draws.groupby(["setting", "chemistry"]).size().eq(30).all()
     assert draws.groupby("chemistry")["value"].mean().round(2).to_dict() == {"X": 1.0, "Y": 2.0}
+
+
+def test_loo_by_cell_sums_to_the_total_of_the_fit_and_checks_the_length():
+    generator = np.random.default_rng(0)
+    log_likelihood = generator.normal(-1.0, 0.3, size=(2, 200, 6))
+    idata = az.from_dict(posterior={"mu": generator.normal(size=(2, 200))}, log_likelihood={"y": log_likelihood})
+    cells = np.array(["a", "a", "a", "b", "b", "b"])
+    table = hier.loo_by_cell({"model": idata}, cells)
+    assert set(table["cell"]) == {"a", "b"}
+    assert table["elpd"].sum() == pytest.approx(float(az.loo(idata).elpd_loo))
+    with pytest.raises(ValueError, match="one cell for each observation"):
+        hier.loo_by_cell({"model": idata}, cells[:5])

@@ -433,6 +433,57 @@ def prior_sensitivity(fits: dict[str, az.InferenceData], probability: float = 0.
     return pd.concat(frames, ignore_index=True)
 
 
+def loo_by_cell(fits: dict[str, az.InferenceData], cells: np.ndarray) -> pd.DataFrame:
+    """Expected log predictive density of each cell under leave-one-out cross-validation, for every model.
+
+    Leave-one-out cross-validation scores each observation by the log density the model gives it when that single
+    observation is left out of the fit (Vehtari, Gelman and Gabry, 2017). Summing the scores of the observations of
+    one cell shows which cells a model predicts well *at the cycles it has not been shown*, which is a statement about
+    cells that are in the data, and not about a cell the model has never seen.
+
+    Args:
+        fits: Fits with the log likelihood stored, keyed by model name.
+        cells: Cell of each observation, in the order of the observations of the fits.
+
+    Returns:
+        Rows with ``method``, ``cell``, ``elpd`` (the summed pointwise score) and ``bad`` (observations with a Pareto
+        shape above 0.7, for which the estimate is unreliable).
+
+    Raises:
+        ValueError: If the length of ``cells`` is not the number of observations of a fit.
+    """
+    cells = np.asarray(cells)
+    rows = []
+    for method, idata in fits.items():
+        result = az.loo(idata, pointwise=True)
+        scores = np.asarray(result.loo_i)
+        if scores.shape[0] != cells.shape[0]:
+            raise ValueError("there must be one cell for each observation")
+        shapes = np.asarray(result.pareto_k)
+        frame = pd.DataFrame({"cell": cells, "elpd": scores, "bad": shapes > 0.7})
+        summed = frame.groupby("cell", sort=False).agg(elpd=("elpd", "sum"), bad=("bad", "sum")).reset_index()
+        rows.append(summed.assign(method=method))
+    return pd.concat(rows, ignore_index=True)
+
+
+def chemistry_draws(idata: az.InferenceData, draws: int = 2000, seed: int = 0) -> pd.DataFrame:
+    """Posterior draws of the three chemistry parameters of a partial-pooling fit, to be drawn as densities.
+
+    Args:
+        idata: Inference data of a partial-pooling model.
+        draws: Draws kept for each parameter and chemistry.
+        seed: Seed of the thinning.
+
+    Returns:
+        Rows with ``quantity``, ``chemistry`` and ``value``.
+    """
+    frames = [
+        sensitivity_draws({"posterior": idata}, variable, draws, seed).drop(columns="setting").assign(quantity=quantity)
+        for variable, quantity in PRIOR_LEVELS.items()
+    ]
+    return pd.concat(frames, ignore_index=True)
+
+
 def sensitivity_draws(
     fits: dict[str, az.InferenceData], variable: str = "loglambda_chem", draws: int = 2000, seed: int = 0
 ) -> pd.DataFrame:

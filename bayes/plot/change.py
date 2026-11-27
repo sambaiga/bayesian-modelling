@@ -109,7 +109,7 @@ def change(  # noqa: ANN201
         + scale_x_continuous(limits=[low - left, high + room], format="{.0f}" + unit)
         + labs(x="", y="")
         + site_theme()
-        + canvas(900 if drawn["panel"].nunique() > 1 else 780, 60 + 40 * len(rows), drawn["panel"].nunique(), ncol)
+        + canvas(900 if drawn["panel"].nunique() > 1 else 400, 60 + 40 * len(rows), drawn["panel"].nunique(), ncol)
     )
     for side, hjust in (
         (0.0, 0),

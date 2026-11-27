@@ -150,7 +150,7 @@ def curves(frame: pd.DataFrame, held_out: list[str], colours: dict[str, str], th
         + scale_x_continuous(limits=[0, drawn["cycle"].max() + 280])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
-        + canvas(780, 340)
+        + canvas(620, 300)
     )
 
 
@@ -193,44 +193,51 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
         + scale_x_continuous(breaks=[0, 25, 50, 75, 100])
         + labs(x="State of health (%)", y="Density")
         + site_theme()
-        + canvas(720, 330)
+        + canvas(540, 300)
     )
 
 
 def chemistry(  # noqa: ANN201
-    intervals: pd.DataFrame, colours: dict[str, str], quantity: str | None = None, size: tuple[int, int] = (780, 190)
+    draws: pd.DataFrame, colours: dict[str, str], quantity: str, size: tuple[int, int] = (330, 240)
 ):
-    """Posterior mean and interval of a chemistry parameter, one row for each chemistry.
+    """Posterior density of one chemistry parameter, one curve for each chemistry.
+
+    The overlap of the curves is what the reader needs: the further apart they lie, the more surely the chemistries
+    differ in that parameter. Each parameter is a figure of its own so that it becomes a subfigure.
 
     Args:
-        intervals: Rows with ``quantity``, ``chemistry``, ``mean``, ``lower`` and ``upper``.
+        draws: Rows from ``hierarchical.chemistry_draws`` with ``quantity``, ``chemistry`` and ``value``.
         colours: Colour of each chemistry.
-        quantity: The parameter to draw, so that each parameter is a subfigure of its own; every parameter in one panel
-            each when ``None``.
-        size: Width and height of a figure with one parameter, in pixels.
+        quantity: The parameter to draw.
+        size: Width and height of the figure in pixels.
 
     Returns:
         The figure.
     """
-    names = list(colours)
-    frame = intervals if quantity is None else intervals[intervals["quantity"] == quantity]
-    frame = frame.assign(row=frame["chemistry"].map({name: index + 1 for index, name in enumerate(names)}))
-    panels = frame["quantity"].nunique()
-    plot = (
-        ggplot(frame)
-        + geom_segment(aes(x="lower", xend="upper", y="row", yend="row", color="chemistry"), size=1.8)
-        + geom_point(aes("mean", "row", color="chemistry"), shape=21, fill="white", size=4.5, stroke=1.7)
-        + scale_color_manual(values=colours)
-        + label(
-            frame.assign(x=frame["mean"], y=frame["row"] + 0.33, label=frame["mean"].map("{:.2f}".format)), hjust=0.5
-        )
-        + scale_y_continuous(breaks=list(range(1, len(names) + 1)), labels=names, limits=[0.5, len(names) + 0.7])
-        + labs(x=quantity or "Posterior mean and 90% interval", y="")
-        + site_theme()
+    rows = draws[draws["quantity"] == quantity].rename(columns={"chemistry": "distribution"})
+    names = [name for name in colours if name in set(rows["distribution"])]
+    plot = plot_density(
+        rows,
+        title=None,
+        x_label=quantity,
+        y_label="",
+        colours=[colours[name] for name in names],
+        line_size=1.6,
+        theme=None,
     )
-    if panels > 1:
-        return plot + facet_wrap("quantity", ncol=columns(3), scales="free_x") + canvas(840, 260, 3, 3)
-    return plot + canvas(*size)
+    return (
+        plot
+        + site_theme()
+        + theme(
+            legend_position="top",
+            legend_title=element_blank(),
+            axis_line_y=element_blank(),
+            axis_text_y=element_blank(),
+            axis_ticks_y=element_blank(),
+            axis_title_x=element_text(face="plain", size=11),
+        )
+        + canvas(*size)
+    )
 
 
 def shrinkage(  # noqa: ANN201
@@ -498,34 +505,68 @@ def value(frame: pd.DataFrame, floor: float = -1.0):  # noqa: ANN201
         + scale_y_continuous(limits=[floor - 0.05, 1.0])
         + labs(x="Cost-loss ratio of retiring a cell", y="Relative economic value")
         + site_theme()
-        + canvas(780, 340)
+        + canvas(440, 300)
     )
 
 
-def loo(table: pd.DataFrame, best: str):  # noqa: ANN201
-    """Loss in expected log predictive density against the best model, with a one-standard-error bar.
+def loo(  # noqa: ANN201
+    frame: pd.DataFrame,
+    colours: dict[str, str],
+    chemistry_of: dict[str, str],
+    method: str,
+    reference: str,
+    size: tuple[int, int] = (440, 320),
+):
+    """Gain in expected log predictive density of one model over a reference, for each cell.
+
+    Each bar is the sum, over the observations of one cell, of the leave-one-out score of ``method`` minus that of
+    ``reference``. A bar to the left of zero means the model predicts the left-out cycles of that cell worse than the
+    reference does; the total of the bars is the difference that ``arviz.compare`` reports.
 
     Args:
-        table: Rows with ``method``, ``elpd_diff`` and ``dse``, as returned by ``arviz.compare`` with the index reset.
-        best: Name of the best model, drawn as a filled point.
+        frame: Rows from ``hierarchical.loo_by_cell`` with ``method``, ``cell`` and ``elpd``.
+        colours: Colour of each chemistry.
+        chemistry_of: Chemistry of each cell.
+        method: The model to draw.
+        reference: The model it is measured against.
+        size: Width and height of the figure in pixels.
 
     Returns:
         The figure.
     """
-    frame = table.assign(row=np.arange(len(table), 0, -1))
-    frame["low"], frame["high"] = frame["elpd_diff"] - frame["dse"], frame["elpd_diff"] + frame["dse"]
+    wide = frame.pivot(index="cell", columns="method", values="elpd")
+    rows = (wide[method] - wide[reference]).rename("gain").reset_index()
+    rows["chemistry"] = rows["cell"].map(chemistry_of)
+    order = {name: index for index, name in enumerate(colours)}
+    rows = rows.assign(rank=rows["chemistry"].map(order)).sort_values(["rank", "gain"], ascending=[True, False])
+    rows["zero"] = 0.0
+    rows["label"] = rows["gain"].map("{:+,.0f}".format)
+    low, high = float(rows["gain"].min()), float(rows["gain"].max())
+    span = max(high, 0.0) - min(low, 0.0)
+    plot = (
+        ggplot(rows)
+        + geom_vline(xintercept=0, color=SLATE, size=0.5)
+        + geom_segment(aes(x="zero", xend="gain", y="cell", yend="cell", color="chemistry"), size=6)
+    )
+    for side, hjust, keep in ((1.0, 0.0, rows["gain"] >= 0), (-1.0, 1.0, rows["gain"] < 0)):
+        if keep.any():  # a text layer without rows cannot be drawn
+            plot += geom_text(
+                aes("gain", "cell", label="label"),
+                size=5.2,
+                color=SLATE,
+                hjust=hjust,
+                nudge_x=side * 0.03 * span,
+                data=rows[keep],
+            )
     return (
-        ggplot(frame)
-        + geom_vline(xintercept=0, color=SLATE, linetype="dotted", size=0.5)
-        + geom_segment(aes(x="low", xend="high", y="row", yend="row"), color=SLATE, size=1.0)
-        + geom_point(aes("elpd_diff", "row", fill="method"), shape=21, color=BLUE, size=4.0, stroke=1.4)
-        + scale_fill_manual(values={name: (BLUE if name == best else "white") for name in frame["method"]})
-        + label(frame.assign(x=frame["elpd_diff"], y=frame["row"] + 0.38, label=frame["method"]), hjust=0.5)
-        + scale_y_continuous(breaks=[], limits=[0.4, len(frame) + 0.7])
-        + labs(x="Loss in expected log predictive density against the best model (smaller is better)", y="")
+        plot
+        + scale_color_manual(values=colours)
+        + scale_y_discrete(limits=list(rows["cell"])[::-1], expand=[0.0, 0.8])
+        + scale_x_continuous(limits=[min(low, 0.0) - 0.22 * span, max(high, 0.0) + 0.22 * span])
+        + labs(x="Gain in expected log density over " + reference.lower(), y="")
         + site_theme()
-        + theme(axis_line_y=element_blank(), axis_ticks_y=element_blank())
-        + canvas(780, 240)
+        + theme(legend_position="none", axis_line_y=element_blank(), axis_ticks_y=element_blank())
+        + canvas(*size)
     )
 
 

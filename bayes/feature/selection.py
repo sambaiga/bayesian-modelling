@@ -316,7 +316,7 @@ def select_top_features(
     include_rf: bool = True,
     fast_mode: bool = False,
     n_jobs: int = -1,
-    var_threshold:float = 1e-8,
+    var_threshold: float = 1e-8,
 ) -> list[str] | tuple[list[str], pd.DataFrame]:
     """Selects top-k features using multiple metrics and rank aggregation.
 
@@ -359,7 +359,6 @@ def select_top_features(
         label_encoder = LabelEncoder()
         data[target] = label_encoder.fit_transform(data[target])
         log.info("Auto-encoded target '%s': %s", target, dict(enumerate(label_encoder.classes_)))
-
 
     variances = data[features].var(numeric_only=True)
     constant_features = variances[variances <= var_threshold].index.tolist()

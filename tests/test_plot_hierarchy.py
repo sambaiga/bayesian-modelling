@@ -41,16 +41,39 @@ def test_spread_leaves_well_separated_values_unchanged():
     assert hierarchy.spread([1.0, 5.0, 3.0], gap=0.5) == [1.0, 5.0, 3.0]
 
 
-def test_the_loo_figure_marks_the_best_model_and_draws_one_row_per_model():
-    table = pd.DataFrame({"method": ["A", "B", "C"], "elpd_diff": [0.0, 10.0, 200.0], "dse": [0.0, 3.0, 20.0]})
-    spec = hierarchy.loo(table, best="A").as_dict()
-    assert labels_of(spec) == {"A", "B", "C"}
+LOO = pd.DataFrame(
+    {
+        "method": ["No pooling"] * 4 + ["Partial pooling"] * 4,
+        "cell": ["A_1", "A_2", "B_1", "B_2"] * 2,
+        "elpd": [10.0, 20.0, 30.0, 40.0, 5.0, 25.0, 20.0, 35.0],
+    }
+)
+
+
+def loo_figure():
+    colours = hierarchy.palette(["A", "B"])
+    chemistry_of = {"A_1": "A", "A_2": "A", "B_1": "B", "B_2": "B"}
+    return hierarchy.loo(LOO, colours, chemistry_of, "Partial pooling", "No pooling")
+
+
+def test_the_loo_figure_draws_one_bar_for_each_cell_with_its_gain_over_the_reference():
+    spec = loo_figure().as_dict()
+    assert labels_of(spec) == {"-5", "+5", "-10"}
+
+
+def test_the_loo_figure_draws_when_every_cell_gains_or_every_cell_loses():
+    colours = hierarchy.palette(["A", "B"])
+    chemistry_of = {"A_1": "A", "A_2": "A", "B_1": "B", "B_2": "B"}
+    worse = LOO.assign(elpd=[10.0, 20.0, 30.0, 40.0, 1.0, 2.0, 3.0, 4.0])
+    better = LOO.assign(elpd=[1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0])
+    for frame in (worse, better):
+        html = inline_svg(hierarchy.loo(frame, colours, chemistry_of, "Partial pooling", "No pooling"))
+        assert "<svg" in html
 
 
 def test_an_inline_svg_scales_with_its_container():
-    plot = hierarchy.loo(pd.DataFrame({"method": ["A"], "elpd_diff": [0.0], "dse": [0.0]}), best="A")
-    html = inline_svg(plot)
-    assert html.startswith('<div class="letsplot"><svg') and 'viewBox="0 0 780 240"' in html and 'width="100%"' in html
+    html = inline_svg(loo_figure())
+    assert html.startswith('<div class="letsplot"><svg') and 'viewBox="0 0 440 320"' in html and 'width="100%"' in html
 
 
 def test_heldout_draws_one_panel_for_each_cell():
@@ -147,19 +170,19 @@ def test_value_draws_one_line_for_each_strategy_and_names_it_at_its_end():
     assert min(spec["data"]["drawn"]) == -1.0  # the control is drawn at the floor, and its label is there too
 
 
-def test_chemistry_draws_the_requested_parameter_alone():
+def test_chemistry_draws_the_requested_parameter_as_one_density_for_each_chemistry():
+    generator = np.random.default_rng(0)
     table = pd.DataFrame(
         {
-            "quantity": ["P", "P", "Q", "Q"],
-            "chemistry": ["A", "B", "A", "B"],
-            "mean": [1.0, 2.0, 3.0, 4.0],
-            "lower": [0.5, 1.5, 2.5, 3.5],
-            "upper": [1.5, 2.5, 3.5, 4.5],
+            "quantity": ["P"] * 200 + ["Q"] * 200,
+            "chemistry": (["A"] * 100 + ["B"] * 100) * 2,
+            "value": generator.normal(size=400),
         }
     )
     colours = hierarchy.palette(["A", "B"])
-    assert labels_of(hierarchy.chemistry(table, colours, "Q").as_dict()) == {"3.00", "4.00"}
-    assert hierarchy.chemistry(table, colours).as_dict()["facet"]["name"] == "wrap"
+    spec = hierarchy.chemistry(table, colours, "Q").as_dict()
+    assert {layer["geom"] for layer in spec["layers"]} == {"density"}
+    assert len(spec["data"]["distribution"]) == 200  # only the requested parameter is drawn
 
 
 def test_priors_keep_the_draws_inside_the_axis_so_that_nothing_is_clipped():

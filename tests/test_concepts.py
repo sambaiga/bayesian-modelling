@@ -33,13 +33,13 @@ def test_every_icon_that_the_diagrams_use_exists_in_the_font():
 def test_each_pooling_diagram_labels_the_held_out_cell_and_says_what_a_new_cell_receives():
     assert "Held out" in texts(concepts.complete(CELLS, HELD, COLOURS))
     assert any("same curve" in text for text in texts(concepts.complete(CELLS, HELD, COLOURS)))
-    assert any("only the prior" in text for text in texts(concepts.none(CELLS, HELD, COLOURS)))
+    assert any("has none" in text for text in texts(concepts.none(CELLS, HELD, COLOURS)))
     assert any("starts there" in text for text in texts(concepts.partial(CELLS, HELD, COLOURS)))
 
 
 def test_only_partial_pooling_has_a_level_for_each_chemistry():
-    assert any(text.startswith("A: ") for text in texts(concepts.partial(CELLS, HELD, COLOURS)))
-    assert not any(text.startswith("A: ") for text in texts(concepts.complete(CELLS, HELD, COLOURS)))
+    assert "A" in texts(concepts.partial(CELLS, HELD, COLOURS))
+    assert "A" not in texts(concepts.complete(CELLS, HELD, COLOURS))
 
 
 def test_cells_are_placed_by_chemistry_with_the_held_out_cell_last_and_a_gap_between_chemistries():
@@ -53,7 +53,15 @@ def test_cells_are_placed_by_chemistry_with_the_held_out_cell_last_and_a_gap_bet
 
 def test_the_decision_names_the_rule_the_two_costs_and_both_outcomes():
     found = " ".join(texts(concepts.decision()))
-    for part in ("Inspect", "probability p", "Retire", "pay C", "Leave", "risk L", "yes", "no", "C / L"):
+    for part in (
+        "Inspect",
+        "Predict",
+        "Compare",
+        "Leave in service",
+        "risk the loss L",
+        "Retire the cell",
+        "pay the cost C",
+    ):
         assert part in found
     assert any("alpha" in text for text in texts(concepts.decision()))
 

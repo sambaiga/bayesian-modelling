@@ -14,12 +14,14 @@ from typing import Any
 
 import matplotlib as mpl
 from matplotlib.font_manager import FontProperties
-from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch, Polygon
+from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch, Polygon, Rectangle
 import matplotlib.pyplot as plt
 import numpy as np
 
 from .icons import ASSETS, icon, iconfont
 from .theme import BLUE, INK, ORANGE, SLATE
+
+ORANGE_TEXT = "#B3471B"  # orange darkened to read as text
 
 mpl.rcParams.update({"svg.fonttype": "path", "mathtext.fontset": "cm"})
 
@@ -134,6 +136,10 @@ def _badge(
     _glyph(ax, xy, name, size, colour if ring else WHITE)
 
 
+PANEL, PANEL_HEIGHT = 66.0, 84.0  # the three pooling panels are shown side by side, a little taller than wide
+SPACING, GAP = 4.5, 4.0
+
+
 def _layout(chemistry_of: dict[str, str], held_out: list[str]) -> list[dict[str, Any]]:
     """The 13 cells along the bottom: chemistry by chemistry, with a gap between them and the held-out cell last."""
     names = list(dict.fromkeys(chemistry_of.values()))
@@ -142,37 +148,49 @@ def _layout(chemistry_of: dict[str, str], held_out: list[str]) -> list[dict[str,
         members = [cell for cell, chemistry in chemistry_of.items() if chemistry == name]
         members.sort(key=lambda cell: cell in held_out)
         cells.extend({"cell": cell, "chemistry": name, "held": cell in held_out, "group": index} for cell in members)
-    spacing = 7.4
-    total = len(cells) * spacing + (len(names) - 1) * 6.0
-    start = (WIDTH - total) / 2 + spacing / 2
+    total = len(cells) * SPACING + (len(names) - 1) * GAP
+    start = (PANEL - total) / 2 + SPACING / 2
     for position, cell in enumerate(cells):
-        cell["x"] = start + position * spacing + cell["group"] * 6.0
+        cell["x"] = start + position * SPACING + cell["group"] * GAP
     return cells
 
 
-def _batteries(
-    ax: plt.Axes, cells: list[dict[str, Any]], colours: dict[str, str], y: float, label: bool = True
-) -> None:
+def _batteries(ax: plt.Axes, cells: list[dict[str, Any]], colours: dict[str, str], y: float) -> None:
     """The cells as battery icons in the colour of their chemistry; a held-out cell has a dashed ring."""
     first_held = True
     for cell in cells:
         colour = colours[cell["chemistry"]]
-        _glyph(ax, (cell["x"], y), "battery-half", 17.0, colour)
+        _glyph(ax, (cell["x"], y), "battery-half", 9.0, colour)
         if cell["held"]:
             ax.add_patch(
                 Circle(
                     (cell["x"], y),
-                    4.4,
+                    2.7,
                     facecolor="none",
                     edgecolor=colour,
-                    linewidth=STROKE * 1.0,
+                    linewidth=STROKE * 0.9,
                     linestyle=(0, (2, 1.6)),
                     zorder=4,
                 )
             )
-            if label and first_held:
-                _text(ax, (cell["x"], y - 7.0), "Held out", SLATE, NOTE - 0.6, ha="center", va="center")
+            if first_held:
+                _text(ax, (cell["x"], y - 5.2), "Held out", SLATE, NOTE - 1.6, ha="center", va="center")
                 first_held = False
+
+
+def _note(ax: plt.Axes, text: str) -> None:
+    """Two short lines under a panel."""
+    _text(ax, (PANEL / 2, 4.0), text, SLATE, NOTE - 1.4, ha="center", va="center", linespacing=1.4)
+
+
+def _panel(height: float = PANEL_HEIGHT) -> tuple[plt.Figure, plt.Axes]:
+    """A pooling panel of ``PANEL`` by ``height`` millimetres in data coordinates of millimetres."""
+    fig = plt.figure(figsize=(PANEL / 25.4, height / 25.4))
+    ax = fig.add_axes((0, 0, 1, 1))
+    ax.set_xlim(0, PANEL)
+    ax.set_ylim(0, height)
+    ax.axis("off")
+    return fig, ax
 
 
 def complete(chemistry_of: dict[str, str], held_out: list[str], colours: dict[str, str]) -> plt.Figure:
@@ -186,17 +204,17 @@ def complete(chemistry_of: dict[str, str], held_out: list[str], colours: dict[st
     Returns:
         The figure.
     """
-    fig, ax = _canvas(66.0)
+    fig, ax = _panel()
     cells = _layout(chemistry_of, held_out)
-    centre = WIDTH / 2
+    middle = PANEL / 2
     for cell in cells:
-        _line(ax, (centre, 49.0), (cell["x"], 19.0))
-    _card(ax, centre - 21, 49.0, 42.0, 12.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
-    _glyph(ax, (centre - 15, 55.0), "boxes", 13.0, SLATE)
-    _glyph(ax, (centre - 7.5, 55.0), "graph-down", 12.0, BLUE)
-    _text(ax, (centre - 2.5, 55.0), "One curve", INK, NOTE, MEDIUM, ha="left", va="center")
-    _batteries(ax, cells, colours, 14.0)
-    _text(ax, (3, 1.8), "Every cell, and a new cell, receives the same curve", SLATE, NOTE - 0.4, va="center")
+        _line(ax, (middle, 62.0), (cell["x"], 20.0), width=0.45)
+    _card(ax, middle - 20, 62.0, 40.0, 13.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
+    _glyph(ax, (middle - 14.5, 68.5), "boxes", 10.0, SLATE)
+    _glyph(ax, (middle - 8.0, 68.5), "graph-down", 10.0, BLUE)
+    _text(ax, (middle - 3.5, 68.5), "One curve", INK, NOTE - 1.0, MEDIUM, ha="left", va="center")
+    _batteries(ax, cells, colours, 15.0)
+    _note(ax, "The same curve for every cell,\nand for a new cell")
     return plt.close(fig) or fig
 
 
@@ -211,31 +229,31 @@ def none(chemistry_of: dict[str, str], held_out: list[str], colours: dict[str, s
     Returns:
         The figure.
     """
-    fig, ax = _canvas(66.0)
+    fig, ax = _panel()
     cells = _layout(chemistry_of, held_out)
+    level, radius = 55.0, 2.0
     for cell in cells:
         colour = colours[cell["chemistry"]]
         if cell["held"]:
-            _badge(ax, (cell["x"], 40.0), "question-lg", SLATE, ring=True)
+            _badge(ax, (cell["x"], level), "question-lg", SLATE, radius=radius, size=6.0, ring=True)
             ax.add_patch(
                 Circle(
-                    (cell["x"], 40.0),
-                    3.4,
+                    (cell["x"], level),
+                    radius,
                     facecolor="none",
                     edgecolor=SLATE,
-                    linewidth=STROKE * 1.0,
+                    linewidth=STROKE * 0.9,
                     linestyle=(0, (2, 1.6)),
                     zorder=6,
                 )
             )
         else:
-            _line(ax, (cell["x"], 36.6), (cell["x"], 19.0))
-            _badge(ax, (cell["x"], 40.0), "graph-down", colour)
-    _text(ax, (3, 59.0), "A curve for each cell, learned from its own record", INK, NOTE, MEDIUM, va="center")
+            _line(ax, (cell["x"], level - radius), (cell["x"], 20.0), width=0.45)
+            _badge(ax, (cell["x"], level), "graph-down", colour, radius=radius, size=6.0)
     held = next(cell for cell in cells if cell["held"])
-    _text(ax, (held["x"] - 1.5, 47.5), "No curve", SLATE, NOTE - 0.6, ha="center", va="center")
-    _batteries(ax, cells, colours, 14.0)
-    _text(ax, (3, 1.8), "A new cell has no curve, only the prior", SLATE, NOTE - 0.4, va="center")
+    _text(ax, (held["x"], level + 5.0), "No curve", SLATE, NOTE - 1.6, ha="center", va="center")
+    _batteries(ax, cells, colours, 15.0)
+    _note(ax, "A curve from each record;\na new cell has none")
     return plt.close(fig) or fig
 
 
@@ -252,50 +270,47 @@ def partial(chemistry_of: dict[str, str], held_out: list[str], colours: dict[str
     Returns:
         The figure.
     """
-    fig, ax = _canvas(84.0)
+    fig, ax = _panel()
     cells = _layout(chemistry_of, held_out)
     names = list(dict.fromkeys(chemistry_of.values()))
     centres = {name: float(np.mean([c["x"] for c in cells if c["chemistry"] == name])) for name in names}
-    middle = WIDTH / 2
+    middle = PANEL / 2
     for name in names:
         colour = colours[name]
-        _line(ax, (middle, 66.0), (centres[name], 50.0), SLATE, 0.8)
+        _line(ax, (middle, 62.0), (centres[name], 45.5), SLATE, 0.7)
         for cell in cells:
             if cell["chemistry"] == name:
                 _line(
                     ax,
-                    (centres[name], 46.0),
-                    (cell["x"], 19.0),
+                    (centres[name], 42.5),
+                    (cell["x"], 20.0),
                     colour if cell["held"] else SLATE,
-                    0.8 if cell["held"] else 0.5,
+                    0.7 if cell["held"] else 0.45,
                     dashed=cell["held"],
                 )
-    _card(ax, middle - 25, 66.0, 50.0, 12.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
-    _glyph(ax, (middle - 19, 72.0), "boxes", 13.0, SLATE)
-    _text(ax, (middle - 13, 72.0), "Fleet: what chemistries are like", INK, NOTE - 0.4, MEDIUM, ha="left", va="center")
+    _card(ax, middle - 20, 62.0, 40.0, 13.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
+    _glyph(ax, (middle - 14.5, 68.5), "boxes", 10.0, SLATE)
+    _text(ax, (middle - 9.0, 68.5), "Fleet", INK, NOTE - 1.0, MEDIUM, ha="left", va="center")
     for name in names:
-        colour = colours[name]
-        _badge(ax, (centres[name], 48.0), "layers-fill", colour, radius=4.2, size=10.0)
+        _badge(ax, (centres[name], 44.0), "layers-fill", colours[name], radius=3.0, size=7.5)
         side = -1 if name == names[0] else 1
         _text(
             ax,
-            (centres[name] + side * 5.6, 48.0),
-            f"{name}: level,\nrate, amplitude",
+            (centres[name] + side * 4.5, 44.0),
+            name,
             INK,
-            NOTE - 0.6,
+            NOTE - 1.4,
+            MEDIUM,
             ha="right" if side < 0 else "left",
             va="center",
-            linespacing=1.1,
         )
-    _batteries(ax, cells, colours, 14.0)
-    _text(
-        ax, (3, 1.8), "Cells stay close to their chemistry, and a new cell starts there", SLATE, NOTE - 0.4, va="center"
-    )
+    _batteries(ax, cells, colours, 15.0)
+    _note(ax, "Cells stay near their chemistry;\na new cell starts there")
     return plt.close(fig) or fig
 
 
 def decision() -> plt.Figure:
-    """The decision of an operator: inspect a cell, read the probability that it is below 80%, retire it or leave it.
+    """The decision of an operator: three steps, then the probability axis split at the threshold ``alpha``.
 
     The cost ``C`` of retiring and the loss ``L`` of a cell left in service while below the threshold enter only through
     their ratio ``alpha``; retiring is the cheaper choice when the probability exceeds it.
@@ -303,49 +318,46 @@ def decision() -> plt.Figure:
     Returns:
         The figure.
     """
-    fig, ax = _canvas(84.0)
-    y, half_width, half_height = 51.0, 14.0, 17.0
-    steps = [("clipboard2-pulse", "Inspect", "the cell", 2.0), ("bar-chart-line", "Model gives", "probability p", 29.0)]
-    for name, first, second, left in steps:
-        _card(ax, left, y - 14.0, 24.0, 28.0)
-        _glyph(ax, (left + 12.0, y + 6.0), name, 20.0, BLUE)
-        _text(ax, (left + 12.0, y - 3.5), first, INK, NOTE - 0.6, MEDIUM, ha="center", va="center")
-        _text(ax, (left + 12.0, y - 9.5), second, SLATE, NOTE - 1.2, ha="center", va="center")
-    _arrow(ax, (26.5, y), (28.5, y))
-    cx = 68.0  # the decision: a diamond
-    _arrow(ax, (53.5, y), (cx - half_width - 0.3, y))
-    ax.add_patch(
-        Polygon(
-            [(cx - half_width, y), (cx, y + half_height), (cx + half_width, y), (cx, y - half_height)],
-            closed=True,
-            facecolor=PALE_BLUE,
-            edgecolor=tint(BLUE, 0.4),
-            linewidth=STROKE * 0.9,
-            zorder=2,
-        )
-    )
-    _glyph(ax, (cx, y + 6.0), "signpost-split", 15.0, BLUE)
-    _text(ax, (cx, y - 4.0), r"$p > \alpha$ ?", INK, NOTE, MEDIUM, ha="center", va="center")
-    outcomes = [
-        (y + 22.0, "arrow-repeat", BLUE, "Retire", "pay C", "yes"),
-        (y - 22.0, "exclamation-triangle-fill", ORANGE, "Leave", "risk L", "no"),
+    fig, ax = _canvas(66.0)
+    top, card_width, card_height = 58.0, 33.0, 21.0
+    steps = [
+        ("clipboard2-pulse", "Inspect", "measure the cell"),
+        ("bar-chart-line", "Predict", "probability p that\nthe cell is below 80%"),
+        ("signpost-split", "Compare", r"$p$ with $\alpha = C / L$"),
     ]
-    for level, name, colour, first, second, answer in outcomes:
-        toward = 1.0 if level > y else -1.0
-        _card(ax, 90.0, level - 9.5, 28.0, 19.0, face=tint(colour, 0.9), edge=tint(colour, 0.5))
-        _glyph(ax, (96.0, level + 0.5), name, 15.0, colour)
-        _text(ax, (101.5, level + 3.0), first, INK, NOTE - 0.6, MEDIUM, ha="left", va="center")
-        _text(ax, (101.5, level - 3.5), second, SLATE, NOTE - 1.2, ha="left", va="center")
-        _line(ax, (cx, y + toward * half_height), (cx, level), width=0.9)
-        _arrow(ax, (cx, level), (89.7, level))
-        _text(ax, (cx + 1.8, level - toward * 4.5), answer, colour, NOTE - 0.4, MEDIUM, ha="left", va="center")
-    _card(ax, 2.0, 2.0, 116.0, 13.0, face=PALE_BLUE, edge=tint(BLUE, 0.5))
+    gap = (WIDTH - 4.0 - 3 * card_width) / 2
+    for index, (name, first, second) in enumerate(steps):
+        left = 2.0 + index * (card_width + gap)
+        _card(ax, left, top - card_height, card_width, card_height)
+        _glyph(ax, (left + 6.5, top - 7.5), name, 14.0, BLUE)
+        _text(ax, (left + 12.5, top - 7.5), first, INK, NOTE, MEDIUM, ha="left", va="center")
+        _text(ax, (left + 3.0, top - 15.0), second, SLATE, NOTE - 1.4, ha="left", va="center", linespacing=1.4)
+        if index < 2:
+            _arrow(
+                ax,
+                (left + card_width + 0.6, top - card_height / 2),
+                (left + card_width + gap - 0.6, top - card_height / 2),
+            )
+    left, right, base, band = 6.0, 114.0, 12.0, 14.0
+    cut = left + 0.32 * (right - left)  # an illustrative alpha
+    ax.add_patch(Rectangle((left, base), cut - left, band, facecolor=tint(SLATE, 0.88), edgecolor="none", zorder=1))
+    ax.add_patch(Rectangle((cut, base), right - cut, band, facecolor=tint(BLUE, 0.84), edgecolor="none", zorder=1))
+    _line(ax, (cut, base), (cut, base + band + 3.0), colour=ORANGE, width=1.6, dashed=True)
+    _text(ax, (cut, base + band + 5.0), r"$\alpha = C / L$", ORANGE_TEXT, NOTE, MEDIUM, ha="center", va="center")
+    _glyph(ax, (left + 5.0, base + band / 2), "exclamation-triangle", 12.0, SLATE)
+    _text(ax, (left + 10.0, base + band / 2 + 2.6), "Leave in service", INK, NOTE - 0.6, MEDIUM, ha="left", va="center")
+    _text(ax, (left + 10.0, base + band / 2 - 2.8), "risk the loss L", SLATE, NOTE - 1.4, ha="left", va="center")
+    _glyph(ax, (cut + 6.0, base + band / 2), "arrow-repeat", 12.0, BLUE)
+    _text(ax, (cut + 11.5, base + band / 2 + 2.6), "Retire the cell", INK, NOTE - 0.6, MEDIUM, ha="left", va="center")
+    _text(ax, (cut + 11.5, base + band / 2 - 2.8), "pay the cost C", SLATE, NOTE - 1.4, ha="left", va="center")
+    for position, label in ((left, "0"), (right, "1")):
+        _text(ax, (position, base - 3.2), label, SLATE, NOTE - 1.0, ha="center", va="center")
     _text(
         ax,
-        (60.0, 8.5),
-        r"Retire when $p > \alpha = C / L$, the cost over the loss of a cell below 80%",
-        INK,
-        NOTE - 0.8,
+        ((left + right) / 2, base - 3.2),
+        "Probability p that the cell is below 80%",
+        SLATE,
+        NOTE - 1.0,
         ha="center",
         va="center",
     )
