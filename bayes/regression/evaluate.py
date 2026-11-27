@@ -8,6 +8,7 @@ has seen from the cycles that it is scored on, because neighbouring cycles of on
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -24,6 +25,25 @@ STRATEGY = {
     "control": ("complete", False),
 }
 ALPHA = 0.1
+END_OF_LIFE = 80.0  # state of health, in percent, below which a cell is at the end of its useful life
+
+
+class ColdStart(NamedTuple):
+    """The results of :func:`cold_start`.
+
+    Attributes:
+        scores: One row per strategy and number of cycles seen.
+        diagnostics: The sampling diagnostics of every fit.
+        curves: The predictions of every strategy for the whole life of the held-out cells, for each number of cycles
+            seen, with ``strategy`` and ``cycles_seen``.
+        windows: The scored cycles of the held-out cells with the probability ``p_below`` that the state of health is
+            below the end-of-life threshold, for each strategy and number of cycles seen.
+    """
+
+    scores: pd.DataFrame
+    diagnostics: pd.DataFrame
+    curves: pd.DataFrame
+    windows: pd.DataFrame
 
 
 def bands(draws: np.ndarray, alpha: float = ALPHA) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -49,6 +69,7 @@ def predict_cells(
     seed: int,
     known: bool,
     draws: int = 1000,
+    threshold: float | None = None,
 ) -> pd.DataFrame:
     """Median and 90% interval of the state of health at the cycles of each cell in ``rows``.
 
@@ -61,9 +82,12 @@ def predict_cells(
         seed: Seed of the draws; a cell uses ``seed`` plus its position, so no prediction depends on call order.
         known: Whether the cells were part of the fitted data.
         draws: Number of posterior draws.
+        threshold: A state of health in percent; when given, ``p_below`` holds the share of the predictive draws below
+            it, the probability that the cell is at its end of life.
 
     Returns:
-        The rows with the added columns ``median``, ``lower`` and ``upper``.
+        The rows with the added columns ``median``, ``lower`` and ``upper``, and ``p_below`` when ``threshold`` is
+        given.
     """
     pooling, diagnostics = STRATEGY[strategy]
     parts = []
@@ -72,7 +96,10 @@ def predict_cells(
             idata, pooling, cell, scaler, features, cell["CellType"].iloc[0], seed + position, known, diagnostics, draws
         )
         lower, median, upper = bands(predicted)
-        parts.append(cell.assign(median=median, lower=lower, upper=upper))
+        part = cell.assign(median=median, lower=lower, upper=upper)
+        if threshold is not None:
+            part = part.assign(p_below=(predicted < threshold).mean(axis=0))
+        parts.append(part)
     return pd.concat(parts, ignore_index=True)
 
 
@@ -105,11 +132,11 @@ def cold_start(
     features: list[str],
     seen: tuple[int, ...],
     gap: int,
-    main: dict[str, int],
-    refit: dict[str, int],
+    main: dict[str, Any],
+    refit: dict[str, Any],
     cache: Path,
     draws: int = 1000,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> ColdStart:
     """Score every strategy on the held-out cells, after the model has seen 0, then more, early cycles of them.
 
     With ``seen = 0`` the main fits on the training cells are used. For larger values the strategy is refitted on the
@@ -129,8 +156,9 @@ def cold_start(
         draws: Posterior draws used for each prediction.
 
     Returns:
-        The scores (one row per strategy and ``seen``), the sampling diagnostics of every fit, and the predictions of
-        each strategy for the whole life of the held-out cells when nothing of them has been seen.
+        The scores (one row per strategy and ``seen``), the sampling diagnostics of every fit, the predictions of each
+        strategy for the whole life of the held-out cells for every ``seen``, and the scored cycles with the
+        probability that the state of health is below ``END_OF_LIFE``.
 
     Raises:
         ValueError: If ``seen`` does not start with 0.
@@ -138,7 +166,7 @@ def cold_start(
     if not seen or seen[0] != 0:
         raise ValueError("seen must start with 0")
     window = held_out["cycle"] > max(seen) + gap
-    scores, diagnostics, curves = [], [], []
+    scores, diagnostics, curves, windows = [], [], [], []
     for index, strategy in enumerate(STRATEGY):
         pooling, with_diagnostics = STRATEGY[strategy]
         for number in seen:
@@ -153,16 +181,104 @@ def cold_start(
             )
             diagnostics.append({"strategy": strategy, "cycles_seen": number, **hier.convergence(idata)})
             later = predict_cells(
-                idata, strategy, held_out[window], scaler, features, 100 * index + number, number > 0, draws
+                idata,
+                strategy,
+                held_out[window],
+                scaler,
+                features,
+                100 * index + number,
+                number > 0,
+                draws,
+                END_OF_LIFE,
             )
             scores.append({"strategy": strategy, "cycles_seen": number, **score(later)})
+            windows.append(later.assign(strategy=strategy, cycles_seen=number))
+            curves.append(
+                predict_cells(
+                    idata, strategy, held_out, scaler, features, 100 * index + number, number > 0, draws
+                ).assign(strategy=strategy, cycles_seen=number)
+            )
+    return ColdStart(
+        pd.DataFrame(scores),
+        pd.DataFrame(diagnostics),
+        pd.concat(curves, ignore_index=True),
+        pd.concat(windows, ignore_index=True),
+    )
+
+
+def phi_sensitivity(
+    train: pd.DataFrame,
+    held_out: pd.DataFrame,
+    scaler: StandardScaler,
+    features: list[str],
+    seen: tuple[int, ...],
+    gap: int,
+    refit: dict[str, Any],
+    cache: Path,
+    phi_priors: dict[str, tuple[float, float]],
+    trained: dict[str, Any],
+    draws: int = 1000,
+) -> ColdStart:
+    """Score partial pooling on the held-out cells under other priors for the precision of the Beta likelihood.
+
+    The same protocol as :func:`cold_start`, for the partial-pooling strategy only: with ``seen = 0`` the fit on the
+    training cells is taken from ``trained``, and for larger values it is refitted with the cycles of the held-out
+    cells up to ``seen``. The precision sets the width of every predictive interval, so a prior that decides it also
+    decides coverage, the interval score and the probabilities that the retirement rule reads.
+
+    Args:
+        train: Rows of the training cells.
+        held_out: Rows of the held-out cells.
+        scaler: Scaler fitted on the training cells.
+        features: Names of the diagnostic columns.
+        seen: Numbers of cycles shown to the model; it starts with 0.
+        gap: Embargo in cycles between the last cycle seen and the first cycle scored.
+        refit: ``draws``, ``tune`` and ``chains`` of the refits.
+        cache: Folder of the stored fits.
+        phi_priors: Mean and standard deviation of the logarithm of the precision, for each setting.
+        trained: The fit on the training cells under each setting, keyed like ``phi_priors``.
+        draws: Posterior draws used for each prediction.
+
+    Returns:
+        A :class:`ColdStart` whose ``strategy`` column holds the name of the setting.
+
+    Raises:
+        ValueError: If ``seen`` does not start with 0.
+    """
+    if not seen or seen[0] != 0:
+        raise ValueError("seen must start with 0")
+    window = held_out["cycle"] > max(seen) + gap
+    scores, diagnostics, windows = [], [], []
+    for index, (setting, phi_prior) in enumerate(phi_priors.items()):
+        for number in seen:
             if number == 0:
-                curves.append(
-                    predict_cells(idata, strategy, held_out, scaler, features, 100 * index, False, draws).assign(
-                        strategy=strategy
-                    )
+                idata = trained[setting]
+            else:
+                frame = pd.concat([train, held_out[held_out["cycle"] <= number]], ignore_index=True)
+                model = hier.hierarchical_model(frame, scaler, features, "partial", phi_prior=phi_prior)
+                idata = hier.sample(
+                    model,
+                    cache / f"phi-{setting.lower()}-{number}.nc",
+                    seed=7000 + 100 * index + number,
+                    **refit,
                 )
-    return pd.DataFrame(scores), pd.DataFrame(diagnostics), pd.concat(curves, ignore_index=True)
+            diagnostics.append({"strategy": setting, "cycles_seen": number, **hier.convergence(idata)})
+            later = predict_cells(
+                idata,
+                "partial",
+                held_out[window],
+                scaler,
+                features,
+                500 * index + number,
+                number > 0,
+                draws,
+                END_OF_LIFE,
+            )
+            scores.append({"strategy": setting, "cycles_seen": number, **score(later)})
+            windows.append(later.assign(strategy=setting, cycles_seen=number))
+    return ColdStart(
+        pd.DataFrame(scores), pd.DataFrame(diagnostics), pd.DataFrame(), pd.concat(windows, ignore_index=True)
+    )
 
 
 def leave_one_out(
@@ -170,7 +286,7 @@ def leave_one_out(
     features: list[str],
     strategy: str,
     cache: Path,
-    settings: dict[str, int],
+    settings: dict[str, Any],
     seed: int = 2026,
     draws: int = 1000,
     alpha: float = ALPHA,

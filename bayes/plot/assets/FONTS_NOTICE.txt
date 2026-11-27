@@ -1,0 +1,5 @@
+Jost (Owen Earl) and Libre Franklin (Impallari Type), the book's heading and
+body typefaces, as static instances served by Google Fonts. Both are licensed
+under the SIL Open Font License 1.1 (https://openfontlicense.org). They are
+vendored so that the concept diagrams in bayes/plot/concepts.py use the same
+type as the book's pages on machines where the fonts are not installed.

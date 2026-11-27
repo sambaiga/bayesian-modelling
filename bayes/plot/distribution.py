@@ -25,7 +25,7 @@ from .theme import modern_theme, pro_colors
 def plot_density(
     df: pd.DataFrame,
     *,
-    title: str = "Density Plot",
+    title: str | None = "Density Plot",
     subtitle: str | None = None,
     n_samples: int | None = None,
     x_col: str = "value",
@@ -38,6 +38,7 @@ def plot_density(
     caption: str = "Bayes Modelling | Anthony Faustine @2025",
     theme: Literal["dark", "light"] | None = "light",
     fig_size: tuple[int, int] = (300, 280),
+    colours: list[str] | None = None,
 ) -> ggplot:
     """Create an overlaid kernel density plot for multiple distributions from a long-format DataFrame.
 
@@ -49,7 +50,8 @@ def plot_density(
         df: DataFrame with at least two columns:
             - 'value': numeric samples
             - 'distribution': categorical labels for each group
-        title: Main title of the plot.
+        title: Main title of the plot; ``None`` leaves out the title, the subtitle and the caption, for a figure whose
+            caption is written in the page.
         subtitle: Optional subtitle. If None, a default subtitle is generated showing the number
             of samples per distribution (when uniform).
         n_samples: Number of samples per distribution. Used in the default subtitle if provided.
@@ -66,6 +68,7 @@ def plot_density(
             Values >1 increase smoothing, <1 decrease smoothing.
         caption: Plot caption (e.g., author or tool credit).
         fig_size: Figure size as (width, height) in pixels.
+        colours: Colour of each distribution, in the order of ``df[color_col]``; the default palette when ``None``.
         theme: Literal["dark", "light"] | None = "dark",
             - "dark": high-contrast dark background (default)
             - "light": clean light background
@@ -95,14 +98,13 @@ def plot_density(
         )
     distributions = df[color_col].unique()
     n_dist = len(distributions)
-    colors = pro_colors[:n_dist]
+    colors = list(colours) if colours is not None else pro_colors[:n_dist]
 
     default_subtitle = "Empirical Density Estimates"
 
     p = (
-        ggplot(df, aes(x=x_col, color=color_col))
+        ggplot(df, aes(x=x_col, color=color_col, fill=color_col))
         + geom_density(
-            fill="white",
             size=line_size,
             alpha=alpha,
             adjust=adjust,
@@ -110,14 +112,18 @@ def plot_density(
         )
         + scale_color_manual(values=colors)
         + scale_fill_manual(values=colors)
-        + labs(
-            title=title,
-            subtitle=subtitle or default_subtitle,
-            caption=caption,
-            x=x_label,
-            y=y_label,
-            color="Distribution",
-            fill="Distribution",
+        + (
+            labs(
+                title=title,
+                subtitle=subtitle or default_subtitle,
+                caption=caption,
+                x=x_label,
+                y=y_label,
+                color="Distribution",
+                fill="Distribution",
+            )
+            if title is not None
+            else labs(x=x_label, y=y_label, color="", fill="")
         )
         + modern_theme()
         + guides(fill=guide_legend(nrow=1), color=guide_legend(nrow=1))

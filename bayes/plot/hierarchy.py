@@ -25,6 +25,7 @@ from lets_plot import (
     scale_color_manual,
     scale_fill_manual,
     scale_linetype_manual,
+    scale_size_manual,
     scale_x_continuous,
     scale_y_continuous,
     scale_y_discrete,
@@ -32,7 +33,9 @@ from lets_plot import (
 )
 import numpy as np
 import pandas as pd
+from scipy.stats import gaussian_kde
 
+from .distribution import plot_density
 from .theme import BLUE, GREY, INK, ORANGE, SITE_FONT, SLATE, canvas, columns, site_theme
 
 STRATEGIES = {
@@ -99,6 +102,21 @@ def label(frame: pd.DataFrame, colour: str = INK, hjust: float = 0.0, size: floa
     )
 
 
+def peak(values: np.ndarray) -> tuple[float, float]:
+    """Position and height of the mode of the kernel density of the values, where a direct label belongs.
+
+    Args:
+        values: The draws of one density.
+
+    Returns:
+        The value at the highest point of the density and that height.
+    """
+    grid = np.linspace(float(np.min(values)), float(np.max(values)), 400)
+    density = gaussian_kde(values, bw_method="silverman")(grid)
+    top = int(np.argmax(density))
+    return float(grid[top]), float(density[top])
+
+
 def spread(values: list[float], gap: float) -> list[float]:
     """Move values apart so that neighbours are at least ``gap`` apart, keeping their order, for labels at line ends.
 
@@ -148,7 +166,7 @@ def curves(frame: pd.DataFrame, held_out: list[str], colours: dict[str, str], th
         + scale_x_continuous(limits=[0, drawn["cycle"].max() + 280])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
-        + canvas(780, 340)
+        + canvas(620, 300)
     )
 
 
@@ -168,18 +186,14 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
             "source": ["Observed"] * len(observed) + ["Prior predictive"] * len(drawn),
         }
     )
-    peaks = []
-    for source, colour in (("Observed", BLUE), ("Prior predictive", SLATE)):
-        heights, edges = np.histogram(comparison.loc[comparison["source"] == source, "soh"], bins=40, density=True)
-        top = int(np.argmax(heights))
-        peaks.append(
-            {
-                "x": float((edges[top] + edges[top + 1]) / 2),
-                "y": float(heights[top]) * 1.06,
-                "label": source,
-                "colour": colour,
-            }
-        )
+    observed_at, observed_height = peak(comparison.loc[comparison["source"] == "Observed", "soh"].to_numpy())
+    tail = comparison.loc[comparison["source"] == "Prior predictive", "soh"].to_numpy()
+    along = float(np.percentile(tail, 12))  # the prior label sits on the long left tail, where nothing else is drawn
+    tail_height = float(gaussian_kde(tail, bw_method="silverman")(along)[0])
+    peaks = [
+        {"x": observed_at, "y": observed_height * 1.08, "label": "Observed"},
+        {"x": along, "y": tail_height + 0.18 * observed_height, "label": "Prior predictive"},
+    ]
     peaks = pd.DataFrame(peaks)
     return (
         ggplot(comparison, aes("soh", color="source", fill="source"))
@@ -188,42 +202,63 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
         + scale_fill_manual(values={"Observed": BLUE, "Prior predictive": SLATE})
         + label(peaks.iloc[[0]], BLUE, hjust=0.5, size=5.4)
         + label(peaks.iloc[[1]], SLATE, hjust=0.5, size=5.4)
-        + scale_x_continuous(breaks=[0, 25, 50, 75, 100])
+        + scale_x_continuous(breaks=[0, 25, 50, 75, 100], limits=[0, 112])
         + labs(x="State of health (%)", y="Density")
         + site_theme()
-        + canvas(720, 330)
+        + canvas(540, 300)
     )
 
 
-def chemistry(intervals: pd.DataFrame, colours: dict[str, str]):  # noqa: ANN201
-    """Posterior mean and interval of the chemistry parameters, one panel per parameter.
+def chemistry(  # noqa: ANN201
+    draws: pd.DataFrame, colours: dict[str, str], quantity: str, size: tuple[int, int] = (330, 240)
+):
+    """Posterior density of one chemistry parameter, one curve for each chemistry.
+
+    The overlap of the curves is what the reader needs: the further apart they lie, the more surely the chemistries
+    differ in that parameter. Each parameter is a figure of its own so that it becomes a subfigure.
 
     Args:
-        intervals: Rows with ``quantity``, ``chemistry``, ``mean``, ``lower`` and ``upper``.
+        draws: Rows from ``hierarchical.chemistry_draws`` with ``quantity``, ``chemistry`` and ``value``.
         colours: Colour of each chemistry.
+        quantity: The parameter to draw.
+        size: Width and height of the figure in pixels.
 
     Returns:
         The figure.
     """
-    names = list(colours)
-    frame = intervals.assign(row=intervals["chemistry"].map({name: index + 1 for index, name in enumerate(names)}))
+    rows = draws[draws["quantity"] == quantity].rename(columns={"chemistry": "distribution"})
+    names = [name for name in colours if name in set(rows["distribution"])]
+    plot = plot_density(
+        rows,
+        title=None,
+        x_label=quantity,
+        y_label="",
+        colours=[colours[name] for name in names],
+        line_size=1.6,
+        theme=None,
+    )
     return (
-        ggplot(frame)
-        + geom_segment(aes(x="lower", xend="upper", y="row", yend="row", color="chemistry"), size=1.8)
-        + geom_point(aes("mean", "row", color="chemistry"), shape=21, fill="white", size=4.5, stroke=1.7)
-        + scale_color_manual(values=colours)
-        + label(
-            frame.assign(x=frame["mean"], y=frame["row"] + 0.33, label=frame["mean"].map("{:.2f}".format)), hjust=0.5
-        )
-        + facet_wrap("quantity", ncol=columns(3), scales="free_x")
-        + scale_y_continuous(breaks=list(range(1, len(names) + 1)), labels=names, limits=[0.5, len(names) + 0.7])
-        + labs(x="Posterior mean and 90% interval", y="")
+        plot
         + site_theme()
-        + canvas(840, 260, 3, 3)
+        + theme(
+            legend_position="top",
+            legend_title=element_blank(),
+            axis_line_y=element_blank(),
+            axis_text_y=element_blank(),
+            axis_ticks_y=element_blank(),
+            axis_title_x=element_text(face="plain", size=11),
+        )
+        + canvas(*size)
     )
 
 
-def shrinkage(estimates: pd.DataFrame, means: pd.DataFrame, colours: dict[str, str], cells: list[str]):  # noqa: ANN201
+def shrinkage(  # noqa: ANN201
+    estimates: pd.DataFrame,
+    means: pd.DataFrame,
+    colours: dict[str, str],
+    cells: list[str],
+    parameter: str | None = None,
+):
     """Per-cell estimates without pooling and with partial pooling, joined by a segment, against the chemistry mean.
 
     Args:
@@ -232,10 +267,13 @@ def shrinkage(estimates: pd.DataFrame, means: pd.DataFrame, colours: dict[str, s
         means: Rows with ``parameter``, ``chemistry``, ``x0``, ``x1`` and ``value``: the span and level of a chemistry.
         colours: Colour of each chemistry.
         cells: Cells in the order of the horizontal axis.
+        parameter: The parameter to draw, so that each is a subfigure of its own; both in one figure when ``None``.
 
     Returns:
         The figure.
     """
+    if parameter is not None:
+        estimates, means = estimates[estimates["parameter"] == parameter], means[means["parameter"] == parameter]
     frame = estimates.assign(position=estimates["cell"].map({cell: index + 1 for index, cell in enumerate(cells)}))
     frame["fill"] = np.where(frame["method"] == "Partial pooling", frame["chemistry"], "none")
     wide = frame.pivot_table(index=["parameter", "cell", "position"], columns="method", values="mean").reset_index()
@@ -252,64 +290,297 @@ def shrinkage(estimates: pd.DataFrame, means: pd.DataFrame, colours: dict[str, s
         )
         + scale_color_manual(values=colours)
         + scale_fill_manual(values={**colours, "none": "white"})
-        + facet_wrap("parameter", ncol=columns(2), scales="free_y")
         + scale_x_continuous(breaks=list(range(1, len(cells) + 1)), labels=cells)
-        + labs(x="", y="")
+        + labs(x="", y=parameter or "")
         + site_theme()
         + theme(axis_text_x=element_text(angle=60, hjust=1, size=9))
-        + canvas(840, 380, 2, 2)
+        + (
+            canvas(440, 300)
+            if parameter
+            else facet_wrap("parameter", ncol=columns(2), scales="free_y") + canvas(840, 380, 2, 2)
+        )
     )
 
 
-def predictions(frame: pd.DataFrame):  # noqa: ANN201
-    """Median and 90% interval of each strategy against the observed state of health, one row per cell.
+def bands(  # noqa: ANN201
+    frame: pd.DataFrame,
+    colours: dict[str, str],
+    seen: int = 0,
+    threshold: float = 80.0,
+    size: tuple[int, int] = (780, 340),
+):
+    """Median and 90% interval of one strategy for the held-out cells, with the observations and a key.
+
+    The band and the median take the colour of the chemistry of the cell. A band that the observations leave is the
+    picture of an over-confident prediction. The key above the plot names every kind of mark: the median, the interval,
+    the observations, the end-of-life threshold and, when the model has seen cycles, the cycles seen. The cells are
+    named at the ends of their lines.
 
     Args:
-        frame: Rows with ``cell``, ``method``, ``cycle``, ``observed``, ``median``, ``lower`` and ``upper``.
+        frame: Rows of one strategy and one number of cycles seen, with ``cell``, ``CellType``, ``cycle``, ``soh``,
+            ``median``, ``lower`` and ``upper``.
+        colours: Colour of each chemistry.
+        seen: Cycles of the cell that the model has seen; a dashed line marks them when positive.
+        threshold: End-of-life threshold in percent.
+        size: Width and height of the figure in pixels.
 
     Returns:
         The figure.
     """
-    phone = columns(0, 1) == 1
-    drawn = frame.assign(panel=frame["method"] + ", " + frame["cell"]) if phone else frame
-    layout = facet_wrap("panel", ncol=1) if phone else facet_grid(x="method", y="cell")
+    ends = frame.sort_values("cycle").groupby("cell").tail(1)
+    ends = ends.assign(x=ends["cycle"] + 40, y=ends["median"], label=ends["cell"])
+    reach = float(frame["cycle"].max())
+    width = reach + 300
+    plot = (
+        ggplot(frame, aes("cycle"))
+        + geom_hline(yintercept=threshold, color=SLATE, linetype="dotted", size=0.5)
+        + geom_ribbon(aes(ymin="lower", ymax="upper", group="cell", fill="CellType"), size=0)
+        + scale_fill_manual(values={name: tint(colour, 0.75) for name, colour in colours.items()})
+        + geom_line(aes(y="median", group="cell", color="CellType"), size=1.2)
+        + scale_color_manual(values=colours)
+        + geom_point(aes(y="soh", group="cell"), color=INK, shape=21, fill="white", size=1.4, stroke=0.6)
+        + label(ends, INK, size=5.4)
+    )
+    if seen:
+        marker = pd.DataFrame({"x": [seen], "bottom": [0.0], "top": [105.0]})  # stops under the key
+        plot += geom_segment(
+            aes(x="x", xend="x", y="bottom", yend="top"),
+            data=marker,
+            color=SLATE,
+            linetype="dashed",
+            size=0.6,
+            inherit_aes=False,
+        )
+    # the key: two rows above the plot, one entry for each kind of mark; the colour of a chemistry is named at the lines
+    swatch = width * 0.07
+    columns_at = [width * 0.02, width * 0.36, width * 0.70]
+    first, second = 126.0, 117.0
+
+    def entry(kind: str, text: str, x0: float, y: float) -> list:
+        line = pd.DataFrame({"x0": [x0], "x1": [x0 + swatch], "y": [y]})
+        spec = aes(x="x0", xend="x1", y="y", yend="y")
+        if kind == "median":
+            marks = [geom_segment(spec, data=line, color=SLATE, size=1.2, inherit_aes=False)]
+        elif kind == "interval":
+            marks = [geom_segment(spec, data=line, color=tint(SLATE, 0.7), size=6.0, inherit_aes=False)]
+        elif kind == "point":
+            point = pd.DataFrame({"x": [x0 + swatch / 2], "y": [y]})
+            marks = [
+                geom_point(
+                    aes("x", "y"),
+                    data=point,
+                    color=INK,
+                    shape=21,
+                    fill="white",
+                    size=1.8,
+                    stroke=0.7,
+                    inherit_aes=False,
+                )
+            ]
+        else:
+            marks = [geom_segment(spec, data=line, color=SLATE, linetype=kind, size=0.7, inherit_aes=False)]
+        words = pd.DataFrame({"x": [x0 + swatch * 1.25], "y": [y], "label": [text]})
+        return [*marks, label(words, INK, size=4.8)]
+
+    rows = [
+        ("median", "Median", columns_at[0], first),
+        ("interval", "90% interval", columns_at[1], first),
+        ("point", "Observation", columns_at[2], first),
+        ("dotted", f"End of life, {threshold:.0f}%", columns_at[0], second),
+    ]
+    if seen:
+        rows.append(("dashed", "Cycles seen", columns_at[1], second))
+    for kind, text, x0, y in rows:
+        for layer in entry(kind, text, x0, y):
+            plot += layer
     return (
-        ggplot(drawn, aes("cycle"))
-        + geom_ribbon(aes(ymin="lower", ymax="upper"), fill=tint(BLUE, 0.8), size=0)
-        + geom_line(aes(y="median"), color=BLUE, size=1.0)
-        + geom_point(aes(y="observed"), color=INK, shape=21, fill="white", size=1.6, stroke=0.7)
-        + layout
-        + scale_y_continuous(limits=[0, 110])
+        plot
+        + scale_x_continuous(limits=[0, width])
+        + scale_y_continuous(limits=[0, 132], breaks=[0, 20, 40, 60, 80, 100])
         + labs(x="Cycle", y="State of health (%)")
         + site_theme()
-        + canvas(840, 460, frame["method"].nunique() * frame["cell"].nunique(), frame["method"].nunique(), 1)
+        + canvas(*size)
     )
 
 
-def loo(table: pd.DataFrame, best: str):  # noqa: ANN201
-    """Loss in expected log predictive density against the best model, with a one-standard-error bar.
+def priors(frame: pd.DataFrame, quantity: str, colours: dict[str, str]):  # noqa: ANN201
+    """The prior of a parameter and its posterior, as densities on one axis, to show what the data taught the model.
 
     Args:
-        table: Rows with ``method``, ``elpd_diff`` and ``dse``, as returned by ``arviz.compare`` with the index reset.
-        best: Name of the best model, drawn as a filled point.
+        frame: Rows with ``quantity``, ``source`` and ``value``, from ``hierarchical.prior_posterior``.
+        quantity: The parameter to draw.
+        colours: Colour of each chemistry.
 
     Returns:
         The figure.
     """
-    frame = table.assign(row=np.arange(len(table), 0, -1))
-    frame["low"], frame["high"] = frame["elpd_diff"] - frame["dse"], frame["elpd_diff"] + frame["dse"]
+    rows = frame[frame["quantity"] == quantity]
+    low, high = np.percentile(rows["value"], [0.5, 99.5])  # the long tails of a prior would flatten the figure
+    rows = rows[rows["value"].between(low, high)]  # dropped here, so that the axis never has to clip draws
+    shades = {"Prior": SLATE, "Posterior": BLUE, **colours}
+    tops = {
+        source: peak(rows.loc[rows["source"] == source, "value"].to_numpy()) for source in dict.fromkeys(rows["source"])
+    }
+    lift = 0.06 * max(height for _, height in tops.values())  # a label clears even a flat density
+    peaks = [{"x": at, "y": height + lift, "label": source, "source": source} for source, (at, height) in tops.items()]
+    peaks = pd.DataFrame(peaks)
+    plot = ggplot(rows, aes("value", color="source", fill="source")) + geom_density(size=1.0, alpha=0.2, trim=True)
+    for source in peaks["source"]:
+        plot += label(peaks[peaks["source"] == source], INK, hjust=0.5, size=5.4)
     return (
-        ggplot(frame)
-        + geom_vline(xintercept=0, color=SLATE, linetype="dotted", size=0.5)
-        + geom_segment(aes(x="low", xend="high", y="row", yend="row"), color=SLATE, size=1.0)
-        + geom_point(aes("elpd_diff", "row", fill="method"), shape=21, color=BLUE, size=4.0, stroke=1.4)
-        + scale_fill_manual(values={name: (BLUE if name == best else "white") for name in frame["method"]})
-        + label(frame.assign(x=frame["elpd_diff"], y=frame["row"] + 0.38, label=frame["method"]), hjust=0.5)
-        + scale_y_continuous(breaks=[], limits=[0.4, len(frame) + 0.7])
-        + labs(x="Loss in expected log predictive density against the best model (smaller is better)", y="")
+        plot
+        + scale_color_manual(values=shades)
+        + scale_fill_manual(values=shades)
+        + scale_x_continuous(limits=[float(rows["value"].min()), float(rows["value"].max())])
+        + labs(x=quantity, y="")
+        + theme(axis_line_y=element_blank(), axis_text_y=element_blank(), axis_ticks_y=element_blank())
         + site_theme()
-        + theme(axis_line_y=element_blank(), axis_ticks_y=element_blank())
-        + canvas(780, 240)
+        + canvas(440, 270)
+    )
+
+
+def sensitivity(draws: pd.DataFrame, chemistry: str, quantity: str = "Log rate (per 1,000 cycles)"):  # noqa: ANN201
+    """The posterior of a chemistry parameter under several priors, as overlaid densities with a legend.
+
+    The curves of one chemistry lie on top of one another when the prior does not decide the answer. The densities are
+    drawn by ``bayes.plot.distribution.plot_density``, one panel for each chemistry so that each is a subfigure.
+
+    Args:
+        draws: Rows from ``hierarchical.sensitivity_draws`` with ``setting``, ``chemistry`` and ``value``.
+        chemistry: The chemistry to draw.
+        quantity: Name of the parameter, for the axis.
+
+    Returns:
+        The figure.
+    """
+    rows = draws[draws["chemistry"] == chemistry].rename(columns={"setting": "distribution"})
+    shades = [SLATE, BLUE, tint(BLUE, 0.5)]  # the default prior is the subject; the other two recede
+    plot = plot_density(
+        rows,
+        title=None,
+        x_label=quantity,
+        y_label="",
+        colours=shades[: rows["distribution"].nunique()],
+        line_size=1.6,
+        theme=None,
+    )
+    return (
+        plot
+        + site_theme()
+        + theme(
+            legend_position="top",
+            legend_title=element_blank(),
+            axis_line_y=element_blank(),
+            axis_text_y=element_blank(),
+            axis_ticks_y=element_blank(),
+            axis_title_x=element_text(face="plain", size=11),
+        )
+        + canvas(440, 300)
+    )
+
+
+def value(frame: pd.DataFrame, floor: float = -1.0):  # noqa: ANN201
+    """Relative economic value of each strategy against the cost-loss ratio, for one number of cycles seen.
+
+    Args:
+        frame: Rows of one number of cycles seen with ``strategy``, ``ratio`` and ``value``.
+        floor: Lowest value drawn; a curve that falls below it is drawn at it and its label says where it goes.
+
+    Returns:
+        The figure.
+    """
+    shown = frame.dropna(subset=["value"]).assign(name=lambda rows: rows["strategy"].map(STRATEGIES))
+    floor = max(floor, min(0.0, float(np.floor(shown["value"].min() * 4) / 4)))  # no empty space below the lowest curve
+    shown = shown.assign(drawn=shown["value"].clip(lower=floor))
+    look = {
+        "Partial pooling": (BLUE, 1.5, "solid"),
+        "Complete pooling": (SLATE, 1.0, "solid"),
+        "No pooling": (SLATE, 1.0, "dashed"),
+        "Complete pooling, no diagnostics": (ORANGE, 1.2, "solid"),
+    }
+    ends = shown.sort_values("ratio").groupby("name").tail(1)
+    y = spread([max(float(v), floor) for v in ends["drawn"]], 0.14)
+    names = ends.assign(
+        x=ends["ratio"] + 0.02,
+        y=y,
+        label=ends["name"].map(lambda n: n.replace("Complete pooling, no diagnostics", "Control, no diagnostics")),
+    )
+    plot = ggplot(shown, aes("ratio", "drawn", group="name", color="name", linetype="name")) + geom_hline(
+        yintercept=0.0, color=SLATE, linetype="dotted", size=0.5
+    )
+    plot += geom_line(aes(size="name"))
+    return (
+        plot
+        + scale_color_manual(values={name: look[name][0] for name in look})
+        + scale_linetype_manual(values={name: look[name][2] for name in look})
+        + scale_size_manual(values={name: look[name][1] for name in look})
+        + label(names, INK, size=5.2)
+        + scale_x_continuous(limits=[0.0, 1.0 + 0.34], breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        + scale_y_continuous(limits=[floor - 0.05, 1.0])
+        + labs(x="Cost-loss ratio of retiring a cell", y="Relative economic value")
+        + site_theme()
+        + canvas(440, 300)
+    )
+
+
+def loo(  # noqa: ANN201
+    frame: pd.DataFrame,
+    colours: dict[str, str],
+    chemistry_of: dict[str, str],
+    method: str,
+    reference: str,
+    size: tuple[int, int] = (440, 320),
+):
+    """Gain in expected log predictive density of one model over a reference, for each cell.
+
+    Each bar is the sum, over the observations of one cell, of the leave-one-out score of ``method`` minus that of
+    ``reference``. A bar to the left of zero means the model predicts the left-out cycles of that cell worse than the
+    reference does; the total of the bars is the difference that ``arviz.compare`` reports.
+
+    Args:
+        frame: Rows from ``hierarchical.loo_by_cell`` with ``method``, ``cell`` and ``elpd``.
+        colours: Colour of each chemistry.
+        chemistry_of: Chemistry of each cell.
+        method: The model to draw.
+        reference: The model it is measured against.
+        size: Width and height of the figure in pixels.
+
+    Returns:
+        The figure.
+    """
+    wide = frame.pivot(index="cell", columns="method", values="elpd")
+    rows = (wide[method] - wide[reference]).rename("gain").reset_index()
+    rows["chemistry"] = rows["cell"].map(chemistry_of)
+    order = {name: index for index, name in enumerate(colours)}
+    rows = rows.assign(rank=rows["chemistry"].map(order)).sort_values(["rank", "gain"], ascending=[True, False])
+    rows["zero"] = 0.0
+    rows["label"] = rows["gain"].map("{:+,.0f}".format)
+    low, high = float(rows["gain"].min()), float(rows["gain"].max())
+    span = max(high, 0.0) - min(low, 0.0)
+    plot = (
+        ggplot(rows)
+        + geom_vline(xintercept=0, color=SLATE, size=0.5)
+        + geom_segment(aes(x="zero", xend="gain", y="cell", yend="cell", color="chemistry"), size=6)
+    )
+    for side, hjust, keep in ((1.0, 0.0, rows["gain"] >= 0), (-1.0, 1.0, rows["gain"] < 0)):
+        if keep.any():  # a text layer without rows cannot be drawn
+            plot += geom_text(
+                aes("gain", "cell", label="label"),
+                size=5.2,
+                color=SLATE,
+                hjust=hjust,
+                nudge_x=side * 0.03 * span,
+                data=rows[keep],
+            )
+    return (
+        plot
+        + scale_color_manual(values=colours)
+        + scale_y_discrete(limits=list(rows["cell"])[::-1], expand=[0.0, 0.8])
+        + scale_x_continuous(limits=[min(low, 0.0) - 0.22 * span, max(high, 0.0) + 0.22 * span])
+        + labs(x="Gain in expected log density over " + reference.lower(), y="")
+        + site_theme()
+        + theme(legend_position="none", axis_line_y=element_blank(), axis_ticks_y=element_blank())
+        + canvas(*size)
     )
 
 

@@ -59,7 +59,13 @@ def roles(frame: pd.DataFrame, subject: str | None) -> pd.Series:
 
 
 def change(  # noqa: ANN201
-    frame: pd.DataFrame, reference: str, order: list[str], subject: str | None = None, ncol: int = 3, unit: str = "%"
+    frame: pd.DataFrame,
+    reference: str,
+    order: list[str],
+    subject: str | None = None,
+    ncol: int = 3,
+    unit: str = "%",
+    scale: pd.DataFrame | None = None,
 ):
     """Bars of the change in percent of each method against the reference, one panel for each condition.
 
@@ -72,6 +78,8 @@ def change(  # noqa: ANN201
         ncol: Panels in a row.
         unit: Text after each value and each tick, ``"%"`` or `` pts``. A ``role`` column in ``frame`` (``"worse"``,
             ``"subject"`` or ``"other"``) replaces the colouring by the sign of the change.
+        scale: The rows of the whole figure when ``frame`` holds one panel of several drawn as separate figures; their
+            range sets the axis, so that the panels can be compared.
 
     Returns:
         The figure.
@@ -81,8 +89,9 @@ def change(  # noqa: ANN201
         drawn["role"] = roles(frame, subject)
     drawn["text"] = drawn["value"].map(lambda value: percent(value, unit))
     sign = np.where(drawn["value"] > 0.5, 1.0, -1.0)
-    span = float(drawn["value"].abs().max())
-    low, high = min(float(drawn["value"].min()), 0.0), max(float(drawn["value"].max()), 0.0)
+    whole = drawn["value"] if scale is None else scale["value"]
+    span = float(whole.abs().max())
+    low, high = min(float(whole.min()), 0.0), max(float(whole.max()), 0.0)
     room = 0.3 * span
     left = room if low < -0.05 * span else 0.1 * span
     line = pd.DataFrame({"panel": sorted(drawn["panel"].unique()), "x": 0.0, "y": order[0], "yend": order[-1]})
@@ -90,18 +99,25 @@ def change(  # noqa: ANN201
     drawn["side"] = np.where(drawn["value"] > 0.5, 0.0, 1.0)
     rows = ["​", *order]
     top = pd.DataFrame({"panel": sorted(drawn["panel"].unique())}).assign(name="​", x=0.0, label=reference)
-    return (
+    plot = (
         ggplot(drawn, aes("value", "name", color="role"))
         + geom_segment(aes(x="x", xend="x", y="y", yend="yend"), data=line, color=INK, size=0.9, inherit_aes=False)
         + geom_segment(aes(x="zero", xend="value", y="name", yend="name"), size=11)
         + scale_color_manual(values={"subject": BLUE, "other": SLATE, "worse": ORANGE})
-        + geom_text(aes("end", "name", label="text"), data=drawn[drawn["side"] == 0.0], hjust=0, size=5.6, color=INK)
-        + geom_text(aes("end", "name", label="text"), data=drawn[drawn["side"] == 1.0], hjust=1, size=5.6, color=INK)
         + geom_text(aes("x", "name", label="label"), data=top, size=5.4, color=SLATE, hjust=0.5)
-        + facet_wrap("panel", ncol=columns(ncol))
         + scale_y_discrete(limits=rows[::-1])
         + scale_x_continuous(limits=[low - left, high + room], format="{.0f}" + unit)
         + labs(x="", y="")
         + site_theme()
-        + canvas(900, 60 + 40 * len(rows), drawn["panel"].nunique(), ncol)
+        + canvas(900 if drawn["panel"].nunique() > 1 else 400, 60 + 40 * len(rows), drawn["panel"].nunique(), ncol)
     )
+    for side, hjust in (
+        (0.0, 0),
+        (1.0, 1),
+    ):  # the values are printed at the end of each bar, on the side that it points to
+        printed = drawn[drawn["side"] == side]
+        if len(printed):  # a layer without rows cannot be drawn, as when every bar points the same way
+            plot += geom_text(aes("end", "name", label="text"), data=printed, hjust=hjust, size=5.6, color=INK)
+    if drawn["panel"].nunique() > 1:
+        plot += facet_wrap("panel", ncol=columns(ncol))
+    return plot
