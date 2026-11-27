@@ -103,9 +103,8 @@ def plot_density(
     default_subtitle = "Empirical Density Estimates"
 
     p = (
-        ggplot(df, aes(x=x_col, color=color_col))
+        ggplot(df, aes(x=x_col, color=color_col, fill=color_col))
         + geom_density(
-            fill="white",
             size=line_size,
             alpha=alpha,
             adjust=adjust,

@@ -33,6 +33,7 @@ from lets_plot import (
 )
 import numpy as np
 import pandas as pd
+from scipy.stats import gaussian_kde
 
 from .distribution import plot_density
 from .theme import BLUE, GREY, INK, ORANGE, SITE_FONT, SLATE, canvas, columns, site_theme
@@ -99,6 +100,21 @@ def label(frame: pd.DataFrame, colour: str = INK, hjust: float = 0.0, size: floa
         halo_color="white",
         inherit_aes=False,
     )
+
+
+def peak(values: np.ndarray) -> tuple[float, float]:
+    """Position and height of the mode of the kernel density of the values, where a direct label belongs.
+
+    Args:
+        values: The draws of one density.
+
+    Returns:
+        The value at the highest point of the density and that height.
+    """
+    grid = np.linspace(float(np.min(values)), float(np.max(values)), 400)
+    density = gaussian_kde(values, bw_method="silverman")(grid)
+    top = int(np.argmax(density))
+    return float(grid[top]), float(density[top])
 
 
 def spread(values: list[float], gap: float) -> list[float]:
@@ -170,18 +186,14 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
             "source": ["Observed"] * len(observed) + ["Prior predictive"] * len(drawn),
         }
     )
-    peaks = []
-    for source, colour in (("Observed", BLUE), ("Prior predictive", SLATE)):
-        heights, edges = np.histogram(comparison.loc[comparison["source"] == source, "soh"], bins=40, density=True)
-        top = int(np.argmax(heights))
-        peaks.append(
-            {
-                "x": float((edges[top] + edges[top + 1]) / 2),
-                "y": float(heights[top]) * 1.06,
-                "label": source,
-                "colour": colour,
-            }
-        )
+    observed_at, observed_height = peak(comparison.loc[comparison["source"] == "Observed", "soh"].to_numpy())
+    tail = comparison.loc[comparison["source"] == "Prior predictive", "soh"].to_numpy()
+    along = float(np.percentile(tail, 12))  # the prior label sits on the long left tail, where nothing else is drawn
+    tail_height = float(gaussian_kde(tail, bw_method="silverman")(along)[0])
+    peaks = [
+        {"x": observed_at, "y": observed_height * 1.08, "label": "Observed"},
+        {"x": along, "y": tail_height + 0.18 * observed_height, "label": "Prior predictive"},
+    ]
     peaks = pd.DataFrame(peaks)
     return (
         ggplot(comparison, aes("soh", color="source", fill="source"))
@@ -190,7 +202,7 @@ def prior(observed: np.ndarray, drawn: np.ndarray):  # noqa: ANN201
         + scale_fill_manual(values={"Observed": BLUE, "Prior predictive": SLATE})
         + label(peaks.iloc[[0]], BLUE, hjust=0.5, size=5.4)
         + label(peaks.iloc[[1]], SLATE, hjust=0.5, size=5.4)
-        + scale_x_continuous(breaks=[0, 25, 50, 75, 100])
+        + scale_x_continuous(breaks=[0, 25, 50, 75, 100], limits=[0, 112])
         + labs(x="State of health (%)", y="Density")
         + site_theme()
         + canvas(540, 300)
@@ -283,7 +295,7 @@ def shrinkage(  # noqa: ANN201
         + site_theme()
         + theme(axis_text_x=element_text(angle=60, hjust=1, size=9))
         + (
-            canvas(780, 300)
+            canvas(440, 300)
             if parameter
             else facet_wrap("parameter", ncol=columns(2), scales="free_y") + canvas(840, 380, 2, 2)
         )
@@ -330,7 +342,15 @@ def bands(  # noqa: ANN201
         + label(ends, INK, size=5.4)
     )
     if seen:
-        plot += geom_vline(xintercept=seen, color=SLATE, linetype="dashed", size=0.6)
+        marker = pd.DataFrame({"x": [seen], "bottom": [0.0], "top": [105.0]})  # stops under the key
+        plot += geom_segment(
+            aes(x="x", xend="x", y="bottom", yend="top"),
+            data=marker,
+            color=SLATE,
+            linetype="dashed",
+            size=0.6,
+            inherit_aes=False,
+        )
     # the key: two rows above the plot, one entry for each kind of mark; the colour of a chemistry is named at the lines
     swatch = width * 0.07
     columns_at = [width * 0.02, width * 0.36, width * 0.70]
@@ -398,18 +418,11 @@ def priors(frame: pd.DataFrame, quantity: str, colours: dict[str, str]):  # noqa
     low, high = np.percentile(rows["value"], [0.5, 99.5])  # the long tails of a prior would flatten the figure
     rows = rows[rows["value"].between(low, high)]  # dropped here, so that the axis never has to clip draws
     shades = {"Prior": SLATE, "Posterior": BLUE, **colours}
-    peaks = []
-    for source in dict.fromkeys(rows["source"]):
-        heights, edges = np.histogram(rows.loc[rows["source"] == source, "value"], bins=60, density=True)
-        top = int(np.argmax(heights))
-        peaks.append(
-            {
-                "x": float((edges[top] + edges[top + 1]) / 2),
-                "y": float(heights[top]) * 1.07,
-                "label": source,
-                "source": source,
-            }
-        )
+    tops = {
+        source: peak(rows.loc[rows["source"] == source, "value"].to_numpy()) for source in dict.fromkeys(rows["source"])
+    }
+    lift = 0.06 * max(height for _, height in tops.values())  # a label clears even a flat density
+    peaks = [{"x": at, "y": height + lift, "label": source, "source": source} for source, (at, height) in tops.items()]
     peaks = pd.DataFrame(peaks)
     plot = ggplot(rows, aes("value", color="source", fill="source")) + geom_density(size=1.0, alpha=0.2, trim=True)
     for source in peaks["source"]:
@@ -477,12 +490,13 @@ def value(frame: pd.DataFrame, floor: float = -1.0):  # noqa: ANN201
         The figure.
     """
     shown = frame.dropna(subset=["value"]).assign(name=lambda rows: rows["strategy"].map(STRATEGIES))
+    floor = max(floor, min(0.0, float(np.floor(shown["value"].min() * 4) / 4)))  # no empty space below the lowest curve
     shown = shown.assign(drawn=shown["value"].clip(lower=floor))
     look = {
         "Partial pooling": (BLUE, 1.5, "solid"),
         "Complete pooling": (SLATE, 1.0, "solid"),
         "No pooling": (SLATE, 1.0, "dashed"),
-        "Complete pooling, no diagnostics": (GREY, 1.4, "dotted"),
+        "Complete pooling, no diagnostics": (ORANGE, 1.2, "solid"),
     }
     ends = shown.sort_values("ratio").groupby("name").tail(1)
     y = spread([max(float(v), floor) for v in ends["drawn"]], 0.14)

@@ -184,3 +184,28 @@ def test_coverage_gap_marks_only_a_large_shortfall_as_worse():
     result = evaluate.coverage_gap(scores, 0.9, ["partial", "none"], labels, subject="partial")
     assert result["value"].round(6).tolist() == [10.0, 5.0, -40.0, -2.0]
     assert result["role"].tolist() == ["subject", "other", "worse", "other"]
+
+
+def test_phi_sensitivity_scores_partial_pooling_under_each_prior_on_the_same_window(cells, tmp_path):
+    held = cells[cells["cell"].isin(["X2", "Y2"])]
+    train = cells[~cells["cell"].isin(["X2", "Y2"])].reset_index(drop=True)
+    scaler = StandardScaler().fit(train[FEATURES])
+    tiny = {"draws": 20, "tune": 20, "chains": 2}
+    priors = {"Narrow": (float(np.log(100.0)), 0.3), "Wide": (float(np.log(1000.0)), 1.5)}
+    trained = {
+        name: hier.sample(
+            hier.hierarchical_model(train, scaler, FEATURES, "partial", phi_prior=prior),
+            tmp_path / f"t-{name}.nc",
+            seed=1,
+            **tiny,
+        )
+        for name, prior in priors.items()
+    }
+    result = evaluate.phi_sensitivity(
+        train, held, scaler, FEATURES, (0, 150), 60, tiny, tmp_path, priors, trained, draws=30
+    )
+    assert set(result.scores["strategy"]) == set(priors) and set(result.scores["cycles_seen"]) == {0, 150}
+    assert result.scores["n"].nunique() == 1 and result.scores["n"].iloc[0] == int((held["cycle"] > 210).sum())
+    assert result.windows["p_below"].between(0.0, 1.0).all()
+    with pytest.raises(ValueError):
+        evaluate.phi_sensitivity(train, held, scaler, FEATURES, (100,), 60, tiny, tmp_path, priors, trained)

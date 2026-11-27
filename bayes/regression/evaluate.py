@@ -206,6 +206,81 @@ def cold_start(
     )
 
 
+def phi_sensitivity(
+    train: pd.DataFrame,
+    held_out: pd.DataFrame,
+    scaler: StandardScaler,
+    features: list[str],
+    seen: tuple[int, ...],
+    gap: int,
+    refit: dict[str, Any],
+    cache: Path,
+    phi_priors: dict[str, tuple[float, float]],
+    trained: dict[str, Any],
+    draws: int = 1000,
+) -> ColdStart:
+    """Score partial pooling on the held-out cells under other priors for the precision of the Beta likelihood.
+
+    The same protocol as :func:`cold_start`, for the partial-pooling strategy only: with ``seen = 0`` the fit on the
+    training cells is taken from ``trained``, and for larger values it is refitted with the cycles of the held-out
+    cells up to ``seen``. The precision sets the width of every predictive interval, so a prior that decides it also
+    decides coverage, the interval score and the probabilities that the retirement rule reads.
+
+    Args:
+        train: Rows of the training cells.
+        held_out: Rows of the held-out cells.
+        scaler: Scaler fitted on the training cells.
+        features: Names of the diagnostic columns.
+        seen: Numbers of cycles shown to the model; it starts with 0.
+        gap: Embargo in cycles between the last cycle seen and the first cycle scored.
+        refit: ``draws``, ``tune`` and ``chains`` of the refits.
+        cache: Folder of the stored fits.
+        phi_priors: Mean and standard deviation of the logarithm of the precision, for each setting.
+        trained: The fit on the training cells under each setting, keyed like ``phi_priors``.
+        draws: Posterior draws used for each prediction.
+
+    Returns:
+        A :class:`ColdStart` whose ``strategy`` column holds the name of the setting.
+
+    Raises:
+        ValueError: If ``seen`` does not start with 0.
+    """
+    if not seen or seen[0] != 0:
+        raise ValueError("seen must start with 0")
+    window = held_out["cycle"] > max(seen) + gap
+    scores, diagnostics, windows = [], [], []
+    for index, (setting, phi_prior) in enumerate(phi_priors.items()):
+        for number in seen:
+            if number == 0:
+                idata = trained[setting]
+            else:
+                frame = pd.concat([train, held_out[held_out["cycle"] <= number]], ignore_index=True)
+                model = hier.hierarchical_model(frame, scaler, features, "partial", phi_prior=phi_prior)
+                idata = hier.sample(
+                    model,
+                    cache / f"phi-{setting.lower()}-{number}.nc",
+                    seed=7000 + 100 * index + number,
+                    **refit,
+                )
+            diagnostics.append({"strategy": setting, "cycles_seen": number, **hier.convergence(idata)})
+            later = predict_cells(
+                idata,
+                "partial",
+                held_out[window],
+                scaler,
+                features,
+                500 * index + number,
+                number > 0,
+                draws,
+                END_OF_LIFE,
+            )
+            scores.append({"strategy": setting, "cycles_seen": number, **score(later)})
+            windows.append(later.assign(strategy=setting, cycles_seen=number))
+    return ColdStart(
+        pd.DataFrame(scores), pd.DataFrame(diagnostics), pd.DataFrame(), pd.concat(windows, ignore_index=True)
+    )
+
+
 def leave_one_out(
     frame: pd.DataFrame,
     features: list[str],
