@@ -135,6 +135,7 @@ def sample(
     chains: int,
     seed: int,
     log_likelihood: bool = False,
+    target_accept: float = 0.9,
 ) -> az.InferenceData:
     """Sample the posterior of a model, or read the stored samples when the same fit has been run before.
 
@@ -146,6 +147,8 @@ def sample(
         chains: Number of chains.
         seed: Seed of the sampler, recorded so that a run can be repeated.
         log_likelihood: Whether to store the log likelihood, which leave-one-out cross-validation needs.
+        target_accept: Target acceptance rate of the sampler; a higher value takes smaller steps, which removes
+            divergences.
 
     Returns:
         The inference data.
@@ -158,7 +161,7 @@ def sample(
             tune=tune,
             chains=chains,
             cores=min(chains, 2),
-            target_accept=0.9,
+            target_accept=target_accept,
             random_seed=seed,
             progressbar=False,
             idata_kwargs={"log_likelihood": log_likelihood},
