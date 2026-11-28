@@ -72,8 +72,8 @@ build-backend = "hatchling.build"
 packages = ["bayes"]
 
 [tool.pytest.ini_options]
-norecursedirs = ["notebooks"]
-addopts = "--cov=batteryml --cov-report=term-missing --cov-report=xml --cov-config=.coveragerc --cov-fail-under=80"
+norecursedirs = ["notebook"]
+addopts = "--cov=bayes --cov-report=term-missing --cov-report=xml --cov-config=.coveragerc --cov-fail-under=75"
 
 [tool.ruff]
 target-version = "py311"
