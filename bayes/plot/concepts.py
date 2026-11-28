@@ -136,7 +136,16 @@ def _badge(
     _glyph(ax, xy, name, size, colour if ring else WHITE)
 
 
-PANEL, PANEL_HEIGHT = 66.0, 84.0  # the three pooling panels are shown side by side, a little taller than wide
+SQUEEZE = 0.7  # the fan from the top card to the cells is drawn at this share of its first height, for a phone
+
+
+def up(y: float) -> float:
+    """A height above the row of cells (20 mm), compressed by ``SQUEEZE`` so that a panel is about as tall as wide."""
+    return 20.0 + (y - 20.0) * SQUEEZE
+
+
+TOP = up(62.0)  # the bottom of the top card
+PANEL, PANEL_HEIGHT = 66.0, 66.0  # the three pooling panels are shown side by side and stacked on a phone
 SPACING, GAP = 4.5, 4.0
 
 
@@ -208,11 +217,11 @@ def complete(chemistry_of: dict[str, str], held_out: list[str], colours: dict[st
     cells = _layout(chemistry_of, held_out)
     middle = PANEL / 2
     for cell in cells:
-        _line(ax, (middle, 62.0), (cell["x"], 20.0), width=0.45)
-    _card(ax, middle - 20, 62.0, 40.0, 13.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
-    _glyph(ax, (middle - 14.5, 68.5), "boxes", 10.0, SLATE)
-    _glyph(ax, (middle - 8.0, 68.5), "graph-down", 10.0, BLUE)
-    _text(ax, (middle - 3.5, 68.5), "One curve", INK, NOTE - 1.0, MEDIUM, ha="left", va="center")
+        _line(ax, (middle, TOP), (cell["x"], 20.0), width=0.45)
+    _card(ax, middle - 20, TOP, 40.0, 13.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
+    _glyph(ax, (middle - 14.5, TOP + 6.5), "boxes", 10.0, SLATE)
+    _glyph(ax, (middle - 8.0, TOP + 6.5), "graph-down", 10.0, BLUE)
+    _text(ax, (middle - 3.5, TOP + 6.5), "One curve", INK, NOTE - 1.0, MEDIUM, ha="left", va="center")
     _batteries(ax, cells, colours, 15.0)
     _note(ax, "The same curve for every cell,\nand for a new cell")
     return plt.close(fig) or fig
@@ -231,7 +240,7 @@ def none(chemistry_of: dict[str, str], held_out: list[str], colours: dict[str, s
     """
     fig, ax = _panel()
     cells = _layout(chemistry_of, held_out)
-    level, radius = 55.0, 2.0
+    level, radius = up(55.0), 2.0
     for cell in cells:
         colour = colours[cell["chemistry"]]
         if cell["held"]:
@@ -277,26 +286,26 @@ def partial(chemistry_of: dict[str, str], held_out: list[str], colours: dict[str
     middle = PANEL / 2
     for name in names:
         colour = colours[name]
-        _line(ax, (middle, 62.0), (centres[name], 45.5), SLATE, 0.7)
+        _line(ax, (middle, TOP), (centres[name], up(45.5)), SLATE, 0.7)
         for cell in cells:
             if cell["chemistry"] == name:
                 _line(
                     ax,
-                    (centres[name], 42.5),
+                    (centres[name], up(42.5)),
                     (cell["x"], 20.0),
                     colour if cell["held"] else SLATE,
                     0.7 if cell["held"] else 0.45,
                     dashed=cell["held"],
                 )
-    _card(ax, middle - 20, 62.0, 40.0, 13.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
-    _glyph(ax, (middle - 14.5, 68.5), "boxes", 10.0, SLATE)
-    _text(ax, (middle - 9.0, 68.5), "Fleet", INK, NOTE - 1.0, MEDIUM, ha="left", va="center")
+    _card(ax, middle - 20, TOP, 40.0, 13.0, face=PALE_BLUE, edge=tint(BLUE, 0.55))
+    _glyph(ax, (middle - 14.5, TOP + 6.5), "boxes", 10.0, SLATE)
+    _text(ax, (middle - 9.0, TOP + 6.5), "Fleet", INK, NOTE - 1.0, MEDIUM, ha="left", va="center")
     for name in names:
-        _badge(ax, (centres[name], 44.0), "layers-fill", colours[name], radius=3.0, size=7.5)
+        _badge(ax, (centres[name], up(44.0)), "layers-fill", colours[name], radius=3.0, size=7.5)
         side = -1 if name == names[0] else 1
         _text(
             ax,
-            (centres[name] + side * 4.5, 44.0),
+            (centres[name] + side * 4.5, up(44.0)),
             name,
             INK,
             NOTE - 1.4,

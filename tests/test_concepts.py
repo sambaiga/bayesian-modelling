@@ -70,3 +70,13 @@ def test_a_diagram_is_inline_svg_that_scales_and_needs_no_font():
     html = diagram_svg(concepts.decision())
     assert html.startswith('<div class="concept"') and 'viewBox="0 0 ' in html and 'width="100%"' in html
     assert "<text" not in html  # text and icons are outlines, so the page needs neither the icon font nor the typeface
+
+
+def test_a_pooling_panel_is_about_as_tall_as_it_is_wide_and_holds_all_its_marks():
+    assert concepts.PANEL_HEIGHT / concepts.PANEL <= 1.05  # stacked on a phone, three tall panels are a long scroll
+    for build in (concepts.complete, concepts.none, concepts.partial):
+        figure = build(CELLS, HELD, COLOURS)
+        height = figure.axes[0].get_ylim()[1]
+        assert height == concepts.PANEL_HEIGHT
+        for text in figure.axes[0].texts:
+            assert 0.0 <= text.get_position()[1] <= height  # nothing is drawn above the panel
