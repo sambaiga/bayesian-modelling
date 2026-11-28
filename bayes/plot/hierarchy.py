@@ -308,6 +308,7 @@ def bands(  # noqa: ANN201
     seen: int = 0,
     threshold: float = 80.0,
     size: tuple[int, int] = (780, 340),
+    key: bool = True,
 ):
     """Median and 90% interval of one strategy for the held-out cells, with the observations and a key.
 
@@ -323,6 +324,8 @@ def bands(  # noqa: ANN201
         seen: Cycles of the cell that the model has seen; a dashed line marks them when positive.
         threshold: End-of-life threshold in percent.
         size: Width and height of the figure in pixels.
+        key: Whether to draw the key; the room for it is kept when it is off, so that panels side by side line up and
+            the key need appear on one of them only.
 
     Returns:
         The figure.
@@ -390,7 +393,7 @@ def bands(  # noqa: ANN201
     ]
     if seen:
         rows.append(("dashed", "Cycles seen", columns_at[1], second))
-    for kind, text, x0, y in rows:
+    for kind, text, x0, y in rows if key else []:
         for layer in entry(kind, text, x0, y):
             plot += layer
     return (
@@ -479,17 +482,23 @@ def sensitivity(draws: pd.DataFrame, chemistry: str, quantity: str = "Log rate (
     )
 
 
-def value(frame: pd.DataFrame, floor: float = -1.0):  # noqa: ANN201
+def value(frame: pd.DataFrame, floor: float = -1.0, upto: float = 0.9):  # noqa: ANN201
     """Relative economic value of each strategy against the cost-loss ratio, for one number of cycles seen.
 
     Args:
         frame: Rows of one number of cycles seen with ``strategy``, ``ratio`` and ``value``.
-        floor: Lowest value drawn; a curve that falls below it is drawn at it and its label says where it goes.
+        floor: Lowest value drawn; a curve that falls below it is drawn at it.
+        upto: Highest cost-loss ratio drawn. Near a ratio of 1 the possible saving that the value divides by tends to
+            zero, so the value is unstable there and the curve is stopped before it.
 
     Returns:
         The figure.
     """
-    shown = frame.dropna(subset=["value"]).assign(name=lambda rows: rows["strategy"].map(STRATEGIES))
+    shown = (
+        frame[frame["ratio"] <= upto + 1e-9]
+        .dropna(subset=["value"])
+        .assign(name=lambda rows: rows["strategy"].map(STRATEGIES))
+    )
     floor = max(floor, min(0.0, float(np.floor(shown["value"].min() * 4) / 4)))  # no empty space below the lowest curve
     shown = shown.assign(drawn=shown["value"].clip(lower=floor))
     look = {
@@ -503,7 +512,7 @@ def value(frame: pd.DataFrame, floor: float = -1.0):  # noqa: ANN201
     names = ends.assign(
         x=ends["ratio"] + 0.02,
         y=y,
-        label=ends["name"].map(lambda n: n.replace("Complete pooling, no diagnostics", "Control, no diagnostics")),
+        label=ends["name"].map(lambda n: n.replace("Complete pooling, no diagnostics", "No diagnostics")),
     )
     plot = ggplot(shown, aes("ratio", "drawn", group="name", color="name", linetype="name")) + geom_hline(
         yintercept=0.0, color=SLATE, linetype="dotted", size=0.5
@@ -515,7 +524,7 @@ def value(frame: pd.DataFrame, floor: float = -1.0):  # noqa: ANN201
         + scale_linetype_manual(values={name: look[name][2] for name in look})
         + scale_size_manual(values={name: look[name][1] for name in look})
         + label(names, INK, size=5.2)
-        + scale_x_continuous(limits=[0.0, 1.0 + 0.34], breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        + scale_x_continuous(limits=[0.0, upto + 0.3], breaks=[0.0, 0.2, 0.4, 0.6, 0.8])
         + scale_y_continuous(limits=[floor - 0.05, 1.0])
         + labs(x="Cost-loss ratio of retiring a cell", y="Relative economic value")
         + site_theme()

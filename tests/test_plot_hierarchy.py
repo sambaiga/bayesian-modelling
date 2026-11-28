@@ -166,8 +166,33 @@ def test_value_draws_one_line_for_each_strategy_and_names_it_at_its_end():
         ]
     )
     spec = hierarchy.value(frame).as_dict()
-    assert labels_of(spec) == {"Partial pooling", "Complete pooling", "No pooling", "Control, no diagnostics"}
+    assert labels_of(spec) == {"Partial pooling", "Complete pooling", "No pooling", "No diagnostics"}
     assert min(spec["data"]["drawn"]) == -1.0  # the control is drawn at the floor, and its label is there too
+
+
+def test_value_stops_before_the_ratios_where_the_possible_saving_vanishes():
+    ratios = np.array([0.1, 0.5, 0.9, 0.95, 0.99])
+    frame = pd.DataFrame({"strategy": "partial", "ratio": ratios, "value": [0.2, 0.4, 0.5, 0.0, -2.0]})
+    assert max(hierarchy.value(frame).as_dict()["data"]["ratio"]) == 0.9
+    assert max(hierarchy.value(frame, upto=0.99).as_dict()["data"]["ratio"]) == 0.99
+
+
+def test_bands_draw_the_key_on_request_only_and_keep_the_room_for_it():
+    colours = hierarchy.palette(["A", "B"])
+    shown = hierarchy.bands(one_cell_frame(), colours, seen=100).as_dict()
+    hidden = hierarchy.bands(one_cell_frame(), colours, seen=100, key=False).as_dict()
+    assert {"Median", "90% interval", "Cycles seen"}.isdisjoint(labels_of(hidden))
+    assert "A_1" in labels_of(hidden) and "Median" in labels_of(shown)
+    assert [s["limits"] for s in shown["scales"] if s.get("aesthetic") == "y"] == [
+        s["limits"] for s in hidden["scales"] if s.get("aesthetic") == "y"
+    ]
+
+
+def test_peak_finds_the_mode_of_a_density_where_a_label_belongs():
+    values = np.random.default_rng(0).normal(3.0, 0.5, 4000)
+    at, height = hierarchy.peak(values)
+    assert at == pytest.approx(3.0, abs=0.15)
+    assert height == pytest.approx(1.0 / (0.5 * np.sqrt(2 * np.pi)), rel=0.1)
 
 
 def test_chemistry_draws_the_requested_parameter_as_one_density_for_each_chemistry():
